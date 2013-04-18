@@ -42,6 +42,7 @@ def batch_pred(model, data):
 def train(state, channel):
     # Load data
     # Load the original MNIST dataset.
+    import pdb; pdb.set_trace()
     mnist = fetch_mldata('MNIST original',
         data_home=data_dir)
 
