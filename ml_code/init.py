@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 
-import cPickle, sys
+import cPickle, sys, time
 import numpy
 import sklearn
 from sklearn.datasets import fetch_mldata
 from sklearn.utils import shuffle
-from sklearn.cross_validation import train_test_split # TODO: not used for the moment.
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC, LinearSVC
+from sklearn import cross_validation
 
 from util import dump_tar_bz2
 
@@ -17,9 +17,10 @@ from util import dump_tar_bz2
 data_dir = '/home/chandias/data/IFT6141/'
 # Data preprocessing options.
 scale = 255.
+random_state = 1234
 data_size = 70000
-train_size = 60000
-valid_size = 0
+train_size = 100#50000
+valid_size = 10000
 test_size = 10000
 
 assert data_size <= 70000
@@ -28,6 +29,15 @@ assert train_size > 0 and 10000 >= test_size > 0
 
 save_model_info = True
 save_model = False
+save_state = True
+
+# Type of cross_validation
+# None, 'KFold', 'StratifiedKfold', 'LOO', 'LPO', 'LOLO', 'LPLO', 'ShuffleSplit'
+cv_strategy = None
+
+if cross_validation is not None:
+    assert valid_size > 0
+
 
 def batch_pred(model, data):
     n = 1000
@@ -39,10 +49,10 @@ def batch_pred(model, data):
     return rval
 
 
-def train(state, channel):
+def main(state, channel):
+    start = time.time()
     # Load data
     # Load the original MNIST dataset.
-    import pdb; pdb.set_trace()
     mnist = fetch_mldata('MNIST original',
         data_home=data_dir)
 
@@ -57,12 +67,11 @@ def train(state, channel):
     train_valid_y = mnist.target[:-10000]
     test_x = mnist.data[-10000:, :] / scale
     test_y = mnist.target[-10000:]
-    #X_train, X_test, y_train, y_test = train_test_split(mnist.data, mnist.target)
 
     del mnist
 
     # Shuffle the train, valid and test sets since they are ordered.
-    train_valid_x, train_valid_y = shuffle(train_valid_x, train_valid_y)
+    train_valid_x, train_valid_y = shuffle(train_valid_x, train_valid_y, random_state=random_state)
     test_x, test_y = shuffle(test_x, test_y)
 
     train_x = train_valid_x[:train_size, :]
@@ -72,6 +81,35 @@ def train(state, channel):
     test_x = test_x[-test_size:, :] / scale
     test_y = test_y[-test_size:]
 
+    # Cross-validation.
+    if cv_strategy == 'KFold':
+        assert len(valid_x) > 0
+        print 'KFold used'
+        # Concatenate both the train and validation sets.
+        train_valid_x = numpy.concatenate((train_x, valid_x), axis=0)
+        train_valid_y = numpy.concatenate((train_y, valid_y), axis=0)
+        kf = cross_validation.KFold(len(train_valid_x), n_folds=9)
+        for train_index, valid_index in kf:
+            train_x, valid_x = train_valid_x[train_index], train_valid_x[valid_index]
+            train_y, valid_y = train_valid_y[train_index], train_valid_y[valid_index]
+            train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+    elif cv_strategy is None:
+        print 'No cross-validation'
+        train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+    else:
+        raise NotImplementedError('Cross-validation type not supported.')
+
+    stop = time.time()
+    print 'It took %s minutes'%( (stop-start) / float(60) )
+
+    if save_state:
+        print 'We will save the experiment state'
+        dump_tar_bz2(state, 'state.tar.bz2')
+
+    return 0
+
+
+def train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     if state.model == 'gdbt':
         print 'Fitting GDBT'
         classifier = GradientBoostingClassifier(
@@ -182,18 +220,20 @@ def train(state, channel):
     except:
         print 'Not in experiment, done!'
 
+    return 0
+
 
 def experiment(state, channel):
-    train(state, channel)
+    main(state, channel)
     return channel.COMPLETE
 
 if __name__ == '__main__':
     from jobman import DD, expand
-    args = {'model'             : 'knn',
+    args = {'model'             : 'gdbt',
             # gdbt and random_forest
-            'n_estimators'      : 15,
-            'learning_rate'     : 0.0025,
-            'max_depth'         : 20,
+            'n_estimators'      : 10,
+            'learning_rate'     : 0.1,
+            'max_depth'         : 3,
             # knn
             'n_neighbors'       : 3,
             # svm and lsvm
@@ -224,4 +264,4 @@ if __name__ == '__main__':
     '''
     # wrap args into a DD object
     state = expand(args)
-    train(state, {})
+    main(state, {})
