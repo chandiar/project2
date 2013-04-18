@@ -19,7 +19,7 @@ data_dir = '/home/chandias/data/IFT6141/'
 scale = 255.
 random_state = 1234
 data_size = 70000
-train_size = 100#50000
+train_size = 50000
 valid_size = 10000
 test_size = 10000
 
@@ -29,7 +29,7 @@ assert train_size > 0 and 10000 >= test_size > 0
 
 save_model_info = True
 save_model = False
-save_state = True
+save_state = False
 
 # Type of cross_validation
 # None, 'KFold', 'StratifiedKfold', 'LOO', 'LPO', 'LOLO', 'LPLO', 'ShuffleSplit'
@@ -92,10 +92,10 @@ def main(state, channel):
         for train_index, valid_index in kf:
             train_x, valid_x = train_valid_x[train_index], train_valid_x[valid_index]
             train_y, valid_y = train_valid_y[train_index], train_valid_y[valid_index]
-            train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+            train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
     elif cv_strategy is None:
         print 'No cross-validation'
-        train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+        train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
     else:
         raise NotImplementedError('Cross-validation type not supported.')
 
@@ -109,7 +109,7 @@ def main(state, channel):
     return 0
 
 
-def train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
+def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     if state.model == 'gdbt':
         print 'Fitting GDBT'
         classifier = GradientBoostingClassifier(
@@ -200,11 +200,11 @@ def train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     if save_model:
         # Save the model.
         print 'Pickling the model'
-        path = '%s_classifier.tar.bz2'%state.model
+        path = '%s.tar.bz2'%state.model
         dump_tar_bz2(classifier, path)
 
-    if save_model:
-        # Saving the model valid/test predictions and targets.
+    if save_model_info:
+        # Save the model valid/test predictions and targets.
         model_info = []
         model_info.append({  'predictions': vpredictions,
                             'targets'    : valid_y })
@@ -212,7 +212,7 @@ def train(channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                             'targets'    : test_y  })
 
         print 'Saving the model info'
-        path = 'classifier_info.tar.bz2'
+        path = '%s_info.tar.bz2'%state.model
         dump_tar_bz2(model_info, path)
 
     try:
@@ -231,7 +231,7 @@ if __name__ == '__main__':
     from jobman import DD, expand
     args = {'model'             : 'gdbt',
             # gdbt and random_forest
-            'n_estimators'      : 10,
+            'n_estimators'      : 100,
             'learning_rate'     : 0.1,
             'max_depth'         : 3,
             # knn
