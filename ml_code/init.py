@@ -10,18 +10,24 @@ from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC, LinearSVC
 
+from util import dump_tar_bz2
+
 # Options.
 # Data directory:
-data_dir = '/RQusagers/chandias/data/IFT6141/'
+data_dir = '/home/chandias/data/IFT6141/'
 # Data preprocessing options.
 scale = 255.
 data_size = 70000
-train_size = 50000
-valid_size = 10000
+train_size = 60000
+valid_size = 0
 test_size = 10000
 
 assert data_size <= 70000
-assert train_size + valid_size + test_size == data_size
+assert train_size + valid_size + test_size <= data_size
+assert train_size > 0 and 10000 >= test_size > 0
+
+save_model_info = True
+save_model = False
 
 def batch_pred(model, data):
     n = 1000
@@ -46,41 +52,45 @@ def train(state, channel):
     # TODO: try a [-1, 1] scaling which according to this post gives better results for
     # the svm: http://peekaboo-vision.blogspot.ca/2010/09/mnist-for-ever.html
     # Test that the test sets is the same as the one found in Yann LeCun's page.
-    train_x = mnist.data[:train_size, :] / scale
-    train_y = mnist.target[:train_size]
-    valid_x = mnist.data[train_size:train_size+valid_size, :] / scale
-    valid_y = mnist.target[train_size:train_size+valid_size]
-    test_x = mnist.data[-test_size:, :] / scale
-    test_y = mnist.target[-test_size:]
+    train_valid_x = mnist.data[:-10000, :] / scale
+    train_valid_y = mnist.target[:-10000]
+    test_x = mnist.data[-10000:, :] / scale
+    test_y = mnist.target[-10000:]
     #X_train, X_test, y_train, y_test = train_test_split(mnist.data, mnist.target)
 
     del mnist
 
     # Shuffle the train, valid and test sets since they are ordered.
-    train_x, train_y = shuffle(train_x, train_y)
-    valid_x, valid_y = shuffle(valid_x, valid_y)
+    train_valid_x, train_valid_y = shuffle(train_valid_x, train_valid_y)
     test_x, test_y = shuffle(test_x, test_y)
 
-    if state.model == 'gbdt':
-        print 'Fitting GBDT'
+    train_x = train_valid_x[:train_size, :]
+    train_y = train_valid_y[:train_size]
+    valid_x = train_valid_x[train_size:train_size+valid_size, :]
+    valid_y = train_valid_y[train_size:train_size+valid_size]
+    test_x = test_x[-test_size:, :] / scale
+    test_y = test_y[-test_size:]
+
+    if state.model == 'gdbt':
+        print 'Fitting GDBT'
         classifier = GradientBoostingClassifier(
                           n_estimators=state.n_estimators,
                           learning_rate=state.learning_rate,
                           max_depth=state.max_depth)
         classifier.fit(train_x, train_y)
     elif state.model == 'random_forest':
-        print 'Random Forest'
+        print 'Fitting Random Forest'
         classifier = RandomForestClassifier(
                         n_estimators=state.n_estimators,
                         max_depth=state.max_depth,
                         random_state=0)
         classifier.fit(train_x, train_y)
     elif state.model == 'knn':
-        print 'KNN'
+        print 'Fitting KNN'
         classifier = KNeighborsClassifier(n_neighbors=state.n_neighbors)
         classifier.fit(train_x, train_y)
     elif state.model == 'svm':
-        print 'SVM'
+        print 'Fitting SVM'
         classifier = SVC(
                     C=state.C,
                     kernel=state.kernel,
@@ -91,7 +101,7 @@ def train(state, channel):
                     cache_size=state.cache_size)
         classifier.fit(train_x, train_y)
     elif state.model == 'lsvm':
-        print 'Linear SVM'
+        print 'Fitting Linear SVM'
         classifier = LinearSVC(
                     C=state.C,
                     loss=state.loss,
@@ -106,43 +116,65 @@ def train(state, channel):
         raise NotImplementedError('Model %s not supported.'%state.model)
 
     print 'Results'
+    print 'train_x shape: ', train_x.shape
+    print 'train_y shape: ', train_y.shape
+    print 'valid_x shape: ', valid_x.shape
+    print 'valid_y shape: ', valid_y.shape
+    print 'test_x shape: ', test_x.shape
+    print 'test_y shape: ', test_y.shape
 
     del train_x
     del train_y
 
     if state.model == 'knn':
-        vpredictions = classifier.predict(valid_x)
+        if len(valid_x):
+            print 'Computing valid predictions'
+            vpredictions = classifier.predict(valid_x)
+        else:
+            vpredictions = []
+        print 'Computing test predictions'
         tpredictions = classifier.predict(test_x)
     else:
-        vpredictions = batch_pred(classifier, valid_x)
+        if len(valid_x):
+            print 'Computing valid predictions'
+            vpredictions = batch_pred(classifier, valid_x)
+        else:
+            vpredictions = []
+        print 'Computing test predictions'
         tpredictions = batch_pred(classifier, test_x)
-    diff = vpredictions - valid_y
-    errors = diff[diff!=0]
-    valid_ce = len(errors) / float(len(valid_y))
-    state.valid_ce = valid_ce
+    valid_ce = 0
+    if len(valid_x):
+        diff = vpredictions - valid_y
+        errors = diff[diff!=0]
+        valid_ce = len(errors) / float(len(valid_y))
+    state_valid_ce = valid_ce
 
     diff = tpredictions - test_y
     errors = diff[diff!=0]
     test_ce = len(errors) / float(len(test_y))
     state.test_ce = test_ce
 
+    print 'Classification errors (ce)'
     print 'valid_ce :', valid_ce
     print 'test_ce :', test_ce
 
-    # The model pickle
-    f = open('%s_classifier.pkl'%state.model, 'w')
-    cPickle.dump(classifier, f)
-    f.close()
+    if save_model:
+        # Save the model.
+        print 'Pickling the model'
+        path = '%s_classifier.tar.bz2'%state.model
+        dump_tar_bz2(classifier, path)
 
-    model_info = []
-    model_info.append({  'predictions': vpredictions,
-                         'targets'    : valid_y })
-    model_info.append({  'predictions': tpredictions,
-                         'targets'    : test_y  })
+    if save_model:
+        # Saving the model valid/test predictions and targets.
+        model_info = []
+        model_info.append({  'predictions': vpredictions,
+                            'targets'    : valid_y })
+        model_info.append({  'predictions': tpredictions,
+                            'targets'    : test_y  })
 
-    f = open('classifier_info.pkl','w')
-    cPickle.dump(model_info, f)
-    f.close()
+        print 'Saving the model info'
+        path = 'classifier_info.tar.bz2'
+        dump_tar_bz2(model_info, path)
 
     try:
         channel.save()
@@ -157,7 +189,7 @@ def experiment(state, channel):
 if __name__ == '__main__':
     from jobman import DD, expand
     args = {'model'             : 'knn',
-            # gbdt and random_forest
+            # gdbt and random_forest
             'n_estimators'      : 15,
             'learning_rate'     : 0.0025,
             'max_depth'         : 20,

@@ -14,8 +14,8 @@ r.seed(S)
 
 model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html
-        'gbdt' : {
-            'model'             : 'gbdt',
+        'gdbt' : {
+            'model'             : 'gdbt',
             'n_estimators'      : ((10,500),int),
             'learning_rate'     : ((1e-4,1),float),
             'max_depth'         : ((1,20),int),
@@ -56,14 +56,14 @@ model_config = {
             #'weights'           : 'uniform' or 'distance' or callable function
             #'p'                 : 2,
         # },
-        
+
         # http://scikit-learn.org/dev/modules/generated/sklearn.neighbors.NearestCentroid.html
         # 'nearest_centroid' : {
             # 'model'             : 'nearest_centroid',
             # 'metric'            : 'euclidean',
             # 'shrink_threshold'  : None,
         # },
-        
+
         # http://scikit-learn.org/dev/modules/generated/sklearn.svm.SVC.html
         'svm' : {
             'model'             : 'svm',
@@ -76,7 +76,7 @@ model_config = {
             'cache_size'        : 1000,
             #'max_iter'          : ((100, 1000), int),
         },
-        
+
         # http://scikit-learn.org/dev/modules/generated/sklearn.svm.LinearSVC.html
         'lsvm' : {
             'model'             : 'lsvm',
@@ -88,7 +88,7 @@ model_config = {
             'fit_intercept'     : True,
             'intercept_scaling' : 1, # ((1e-5, 1), float),
             'tol'               : ((1e-5, 1), float),
-        }, 
+        },
 }
 
 def exp_sampling(((low,high),t)):
@@ -120,9 +120,9 @@ def get_cmd(model, mem):
 
 if __name__=='__main__':
     mem = 2000
-    models = {'gbdt': (True, 150, mem), 'random_forest': (True, 150, mem), 
-              'svm' : (True, 150, mem), 'lsvm'         : (True, 150, mem), 
-              'knn' : (True, 150, mem)}
+    models = {'gdbt': (True, 150, mem),  'random_forest': (True, 150, mem),
+              'svm' : (False, 150, mem), 'lsvm'         : (False, 150, mem),
+              'knn' : (False, 150, mem)}
 
     cmds = []
 
