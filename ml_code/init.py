@@ -12,7 +12,7 @@ from sklearn.svm import SVC, LinearSVC
 
 # Options.
 # Data directory:
-data_dir = '/RQusagers/chandias/data/IFT6141/'
+data_dir = '/home/chandias/data/IFT6141/'
 # Data preprocessing options.
 scale = 255.
 data_size = 70000
@@ -36,6 +36,7 @@ def batch_pred(model, data):
 def train(state, channel):
     # Load data
     # Load the original MNIST dataset.
+    import pdb; pdb.set_trace()
     mnist = fetch_mldata('MNIST original',
         data_home=data_dir)
 
