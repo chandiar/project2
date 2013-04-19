@@ -35,7 +35,7 @@ save_state = False
 # None, 'KFold', 'StratifiedKfold', 'LOO', 'LPO', 'LOLO', 'LPLO', 'ShuffleSplit'
 cv_strategy = None
 
-if cross_validation is not None:
+if cv_strategy is not None:
     assert valid_size > 0
 
 
