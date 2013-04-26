@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import cPickle
 import os
 import StringIO
@@ -31,6 +33,10 @@ def dump_tar_bz2(obj, path):
         f_out.close()
         if obj_io is not None:
             obj_io.close()
+
+
+def get_dataset_base_path():
+    return os.environ.get('ML_DATA_PATH')
 
 
 def load_pkl(path):
