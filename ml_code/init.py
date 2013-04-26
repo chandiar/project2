@@ -19,8 +19,8 @@ data_dir = util.get_dataset_base_path()
 scale = 255.
 random_state = 1234
 data_size = 70000
-train_size = 50000
-valid_size = 10000
+train_size = 60000
+valid_size = 0#10000
 test_size = 10000
 
 assert data_size <= 70000
@@ -110,6 +110,13 @@ def main(state, channel):
 
 
 def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
+    print 'train_x shape: ', train_x.shape
+    print 'train_y shape: ', train_y.shape
+    print 'valid_x shape: ', valid_x.shape
+    print 'valid_y shape: ', valid_y.shape
+    print 'test_x shape: ', test_x.shape
+    print 'test_y shape: ', test_y.shape
+
     if state.model == 'gdbt':
         print 'Fitting GDBT'
         classifier = GradientBoostingClassifier(
@@ -155,12 +162,6 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
         raise NotImplementedError('Model %s not supported.'%state.model)
 
     print 'Results'
-    print 'train_x shape: ', train_x.shape
-    print 'train_y shape: ', train_y.shape
-    print 'valid_x shape: ', valid_x.shape
-    print 'valid_y shape: ', valid_y.shape
-    print 'test_x shape: ', test_x.shape
-    print 'test_y shape: ', test_y.shape
 
     del train_x
     del train_y
