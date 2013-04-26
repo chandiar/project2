@@ -16,9 +16,9 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html
         'gdbt' : {
             'model'             : 'gdbt',
-            'n_estimators'      : ((10,500),int),
+            'n_estimators'      : ((40,500),int),
             'learning_rate'     : ((1e-4,1),float),
-            'max_depth'         : ((1,20),int),
+            'max_depth'         : ((3,20),int),
             #'min_samples_split' : ((2,10),int),
             #'min_samples_leaf'  : ((1,10),int),
             #'subsample'         : ((1e-2,1.0),float),
@@ -29,8 +29,8 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.RandomForestClassifier.html
         'random_forest' : {
             'model'             : 'random_forest',
-            'n_estimators'      : ((10,250),int),
-            'max_depth'         : ((1,20),int),
+            'n_estimators'      : ((40,500),int),
+            'max_depth'         : ((3,20),int),
             #'criterion'         : 'gini',
             #'max_features'      : ((1e-4,0.5),float),
             #'min_samples_split' : ((2,10),int),
