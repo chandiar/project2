@@ -9,12 +9,12 @@ from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC, LinearSVC
 from sklearn import cross_validation
-
+import util
 from util import dump_tar_bz2
 
 # Options.
 # Data directory:
-data_dir = '/home/chandias/data/IFT6141/'
+data_dir = util.get_dataset_base_path()
 # Data preprocessing options.
 scale = 255.
 random_state = 1234
@@ -51,8 +51,8 @@ def batch_pred(model, data):
 
 def main(state, channel):
     start = time.time()
-    # Load data
-    # Load the original MNIST dataset.
+    # Load the MNIST dataset.
+    print 'Loading MNIST from '
     mnist = fetch_mldata('MNIST original',
         data_home=data_dir)
 
