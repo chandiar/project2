@@ -21,6 +21,7 @@ References:
 __docformat__ = 'restructedtext en'
 
 
+import collections
 import cPickle
 import gzip
 import os
@@ -31,20 +32,134 @@ import numpy
 
 import theano
 import theano.tensor as T
+from theano.sandbox.rng_mrg import MRG_RandomStreams
+
+# TODO: use the load_data from util.
+from logistic_sgd import load_data
+
+import util
+from util import dump_tar_bz2, load_data, get_theano_constant
+
+rectified_linear_activation = lambda x: T.maximum(0.0, x)
 
 
-from logistic_sgd import LogisticRegression, load_data
+class LinearOutputLayer(object):
+    def __init__(self, inputs, n_in, n_out, W=None, b=None):
+        """ Initialize the parameters of the linear output layer.
+
+        :type inputs: theano.tensor.TensorType
+        :param inputs: symbolic variable that describes the input of the
+                       architecture (one minibatch)
+
+        :type n_in: int
+        :param n_in: number of input units, the dimension of the space in
+                     which the datapoints lie
+
+        :type n_out: int
+        :param n_out: number of output units, the dimension of the space in
+                      which the labels lie
+
+        """
+
+        self.n_in = n_in
+        self.n_out = n_out
+
+        # TODO: number of output units is hardcoded to 10 for mnist.
+        assert n_out == 10
+        # initialize with 0 the weights W as a matrix of shape (n_in, n_out)
+        self.W = theano.shared(value=numpy.zeros((n_in, n_out),
+                            dtype='float32'),name='W')
+        # initialize the baises b as a vector of n_out 0s
+        self.b = theano.shared(value=numpy.zeros((n_out,),
+                            dtype='float32'), name='b')
+
+        if W is not None:
+            self.W = W
+        if b is not None:
+            # dropout will pass b from its dropout_layers[-1]
+            self.b = b
+
+        # TODO: not used.
+        #self.pre_activation = T.dot(inputs, self.W) + self.b
+        self.output = T.dot(inputs, self.W) + self.b
+
+        # parameters of the model
+        self.params = [self.W, self.b]
+
+
+class SoftmaxOutputLayer(LinearOutputLayer):
+    def __init__(self, inputs, n_in, n_out, W=None, b=None):
+        assert n_out > 1
+        super(SoftmaxOutputLayer, self).__init__(inputs, n_in, n_out, W, b)
+
+        # compute vector of class-membership probabilities in symbolic form
+        self.p_y_given_x = T.nnet.softmax(T.dot(inputs, self.W) + self.b)
+        self.output = self.p_y_given_x
+
+        # compute prediction as class whose probability is maximal in
+        # symbolic form
+        self.y_pred = T.argmax(self.p_y_given_x, axis=1)
+
+    def cost(self, y):
+        """Return the mean of the negative log-likelihood of the prediction
+        of this model under a given target distribution.
+
+        .. math::
+
+            \frac{1}{|\mathcal{D}|} \mathcal{L} (\theta=\{W,b\}, \mathcal{D}) =
+            \frac{1}{|\mathcal{D}|} \sum_{i=0}^{|\mathcal{D}|} \log(P(Y=y^{(i)}|x^{(i)}, W,b)) \\
+                \ell (\theta=\{W,b\}, \mathcal{D})
+
+        :type y: theano.tensor.TensorType
+        :param y: corresponds to a vector that gives for each example the
+                  correct label
+
+        Note: we use the mean instead of the sum so that
+              the learning rate is less dependent on the batch size
+        """
+        # y.shape[0] is (symbolically) the number of rows in y, i.e.,
+        # number of examples (call it n) in the minibatch
+        # T.arange(y.shape[0]) is a symbolic vector which will contain
+        # [0,1,2,... n-1] T.log(self.p_y_given_x) is a matrix of
+        # Log-Probabilities (call it LP) with one row per example and
+        # one column per class LP[T.arange(y.shape[0]),y] is a vector
+        # v containing [LP[0,y[0]], LP[1,y[1]], LP[2,y[2]], ...,
+        # LP[n-1,y[n-1]]] and T.mean(LP[T.arange(y.shape[0]),y]) is
+        # the mean (across minibatch examples) of the elements in v,
+        # i.e., the mean log-likelihood across the minibatch.
+        rval = -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
+        return rval
+
+    def cls_error(self, y):
+        """Return a float representing the number of errors in the minibatch
+        over the total number of examples of the minibatch ; zero one
+        loss over the size of the minibatch
+
+        :type y: theano.tensor.TensorType
+        :param y: corresponds to a vector that gives for each example the
+                  correct label
+        """
+
+        # check if y has same dimension of y_pred
+        if y.ndim != self.y_pred.ndim:
+            raise TypeError('y should have the same shape as self.y_pred',
+                ('y', target.type, 'y_pred', self.y_pred.type))
+        # check if y is of the correct datatype
+        if y.dtype.startswith('int'):
+            # the T.neq operator returns a vector of 0s and 1s, where 1
+            # represents a mistake in prediction
+            return T.mean(T.neq(self.y_pred, y))
+        else:
+            raise NotImplementedError()
 
 
 class HiddenLayer(object):
     def __init__(self, rng, input, n_in, n_out, W=None, b=None,
-                 activation=T.tanh):
+                 activation='tanh'):
         """
         Typical hidden layer of a MLP: units are fully-connected and have
         sigmoidal activation function. Weight matrix W is of shape (n_in,n_out)
         and the bias vector b is of shape (n_out,).
-
-        NOTE : The nonlinearity used here is tanh
 
         Hidden unit activation is given by: tanh(dot(input,W) + b)
 
@@ -60,11 +175,14 @@ class HiddenLayer(object):
         :type n_out: int
         :param n_out: number of hidden units
 
-        :type activation: theano.Op or function
+        :type activation: string
         :param activation: Non linearity to be applied in the hidden
                            layer
         """
+        self.n_in = n_in
+        self.n_out = n_out
         self.input = input
+        self.activation = activation
 
         # `W` is initialized with `W_values` which is uniformely sampled
         # from sqrt(-6./(n_in+n_hidden)) and sqrt(6./(n_in+n_hidden))
@@ -83,7 +201,8 @@ class HiddenLayer(object):
                     low=-numpy.sqrt(6. / (n_in + n_out)),
                     high=numpy.sqrt(6. / (n_in + n_out)),
                     size=(n_in, n_out)), dtype=theano.config.floatX)
-            if activation == theano.tensor.nnet.sigmoid:
+            #if self.activation == theano.tensor.nnet.sigmoid:
+            if self.activation == 'sigmoid':
                 W_values *= 4
 
             W = theano.shared(value=W_values, name='W', borrow=True)
@@ -95,11 +214,101 @@ class HiddenLayer(object):
         self.W = W
         self.b = b
 
-        lin_output = T.dot(input, self.W) + self.b
-        self.output = (lin_output if activation is None
-                       else activation(lin_output))
+        linear_output = T.dot(input, self.W) + self.b
+
+        if self.activation == 'rectified_linear':
+            self.output = rectified_linear_activation(linear_output)
+        elif self.activation == 'linear':
+            self.output = linear_output
+        elif self.activation == 'sigmoid':
+            self.output = T.nnet.sigmoid(linear_output)
+        elif self.activation == 'tanh':
+            self.output = T.tanh(linear_output)
+        elif self.activation == 'softplus':
+            self.output = T.nnet.softplus(linear_output)
+        else:
+            raise NotImplementedError('activation function %s not supported.'%self.activation)
+
         # parameters of the model
         self.params = [self.W, self.b]
+
+
+class DropoutHiddenLayer(HiddenLayer):
+    def __init__(self, rng, input, n_in, n_out,
+                 activation, W=None, b=None, dropout_p=0.5):
+
+        print 'constructing the dropout layer with p=%f'%dropout_p
+
+        super(DropoutHiddenLayer, self).__init__(
+                rng=rng, input=input, n_in=n_in, n_out=n_out, W=W, b=b,
+                activation=activation)
+
+        self.output = self.apply_dropout(rng, self.output, p=dropout_p)
+
+    @classmethod
+    def apply_dropout(cls, rng, inputs, p):
+        """p is the probablity of dropping a unit
+        """
+        #srng = theano.tensor.shared_randomstreams.RandomStreams(
+        #        rng.randint(999999))
+        # the following version is much faster
+        srng = MRG_RandomStreams(rng.randint(999999))
+        # p=1-p because 1's indicate keep and p is prob of dropping
+        mask = srng.binomial(n=1, p=1-p, size=inputs.shape)
+        # The cast is important because
+        # int * float32 = float64 which pulls things off the gpu
+        output = inputs * T.cast(mask, 'float32')
+
+        return output
+
+
+class MaxPoolingHiddenLayer(HiddenLayer):
+    """
+    with pooling on the linear, followed by max
+    """
+    # TODO : is activation being used?
+    def __init__(self, rng, input, n_in, n_out, activation,
+                 W=None, b=None, maxout_k=5):
+        self.n_in = n_in
+        self.n_out = n_out
+        self.input = input
+        if W is None:
+            #W_values = numpy.asarray(rng.uniform(
+            #        low=-numpy.sqrt(6. / (n_in + n_out*maxout_k)),
+            #        high=numpy.sqrt(6. / (n_in + n_out*maxout_k)),
+            #        size=(n_in, n_out*maxout_k)), dtype=theano.config.floatX)
+            W_values = numpy.asarray(rng.normal(
+                    loc=0, scale=0.005,
+                    size=(n_in, n_out*maxout_k)), dtype='float32')
+            W = theano.shared(value=W_values, name='W')
+        # rebuild b with proper shape
+        if b is None:
+            b_values = numpy.zeros((n_out,), dtype='float32')
+            b = theano.shared(value=b_values, name='b')
+
+        self.W = W
+        self.b = b
+
+        self.output = T.dot(input, self.W)
+        n_samples = self.output.shape[0]
+        self.output = self.output.reshape((n_samples, n_out, maxout_k))
+        self.output = T.max(self.output, axis=2) + self.b
+
+        self.params = [self.W, self.b]
+
+
+class MaxoutHiddenLayer(MaxPoolingHiddenLayer):
+    # TODO: is activation being used?
+    def __init__(self, rng, input, n_in, n_out, activation,
+                 W=None, b=None, dropout_p=0.5, maxout_k=5):
+        print 'constructing the Maxout layer with p=%f and k=%f'%(
+            dropout_p, maxout_k)
+
+        super(MaxoutHiddenLayer, self).__init__(
+                rng=rng, input=input, n_in=n_in, n_out=n_out,
+                maxout_k=maxout_k, W=W, b=b, activation=activation)
+
+        self.output = DropoutHiddenLayer.apply_dropout(rng, self.output, p=dropout_p)
 
 
 class MLP(object):
@@ -109,18 +318,19 @@ class MLP(object):
     that has one layer or more of hidden units and nonlinear activations.
     Intermediate layers usually have as activation function thanh or the
     sigmoid function (defined here by a ``SigmoidalLayer`` class)  while the
-    top layer is a softamx layer (defined here by a ``LogisticRegression``
+    top layer is a softmax layer (defined here by a ``LogisticRegression``
     class).
     """
 
-    def __init__(self, rng, input, n_in, n_hidden, n_out):
+    def __init__(self, rng, inputs, n_in, hidden_sizes, n_out, activation=None,
+                 dropout_p=False, maxout_k=False):
         """Initialize the parameters for the multilayer perceptron
 
         :type rng: numpy.random.RandomState
         :param rng: a random number generator used to initialize weights
 
-        :type input: theano.tensor.TensorType
-        :param input: symbolic variable that describes the input of the
+        :type inputs: theano.tensor.TensorType
+        :param inputs: symbolic variable that describes the input of the
         architecture (one minibatch)
 
         :type n_in: int
@@ -136,224 +346,630 @@ class MLP(object):
 
         """
 
-        # Since we are dealing with a one hidden layer MLP, this will
-        # translate into a TanhLayer connected to the LogisticRegression
-        # layer; this can be replaced by a SigmoidalLayer, or a layer
-        # implementing any other nonlinearity
-        self.hiddenLayer = HiddenLayer(rng=rng, input=input,
-                                       n_in=n_in, n_out=n_hidden,
-                                       activation=T.tanh)
+        print 'building MLP...'
 
-        # The logistic regression layer gets as input the hidden units
-        # of the hidden layer
-        self.logRegressionLayer = LogisticRegression(
-            input=self.hiddenLayer.output,
-            n_in=n_hidden,
-            n_out=n_out)
+        if dropout_p != -1 or maxout_k != -1:
+            if dropout_p != -1 and maxout_k != -1:
+                # Do not use drop_out_p and maxout_k options at the same time
+                # since drop out is already being done with maxout.
+                #print('dropout_p and maxout_k are both enabled. We will set '
+                #      'dropout_p to -1 since maxout already does drop-out.')
+                #dropout_p = -1
+                import pdb; pdb.set_trace()
+            self._init_with_dropout(rng, inputs, n_in, hidden_sizes, n_out,
+                                    activation, dropout_p, maxout_k)
+
+        else:
+            self._init_ordinary(rng, inputs, n_in, hidden_sizes,
+                                n_out, activation)
+
+    def _init_ordinary(self,rng, inputs, n_in, hidden_sizes, n_out, activation):
+
+        self.layers = []
+        if hidden_sizes[0] == 0:
+            print 'No hidden layer is built.'
+            print 'Ouput layer is a softmax.'
+            output_layer = SoftmaxOutputLayer(
+                inputs=inputs,
+                n_in=n_in, n_out=n_out)
+        else:
+            print 'constructing ordinary %d layers...'%len(hidden_sizes)
+
+            layer_sizes = [n_in] + hidden_sizes + [n_out]
+            weight_matrix_sizes = zip(layer_sizes, layer_sizes[1:])
+            next_layer_input = inputs
+            for n_in, n_out in weight_matrix_sizes[:-1]:
+                print 'building hidden layer of size (%d,%d)'%(n_in, n_out)
+                next_layer = HiddenLayer(rng=rng,
+                                         input=next_layer_input,
+                                         activation=activation,
+                                         n_in=n_in, n_out=n_out,
+                                     )
+                self.layers.append(next_layer)
+                next_layer_input = next_layer.output
+
+            # The logistic regression (softmax) layer
+            n_in, n_out = weight_matrix_sizes[-1]
+            # TODO: number of output hardcoded to 10 for mnnist.
+            assert n_out == 10
+            print 'init softmax with NLL output layer...'
+            output_layer = SoftmaxOutputLayer(
+                        inputs=next_layer_input,
+                        n_in=n_in, n_out=n_out)
+
+        self.layers.append(output_layer)
 
         # L1 norm ; one regularization option is to enforce L1 norm to
         # be small
-        self.L1 = abs(self.hiddenLayer.W).sum() \
-                + abs(self.logRegressionLayer.W).sum()
-
-        # square of L2 norm ; one regularization option is to enforce
-        # square of L2 norm to be small
-        self.L2_sqr = (self.hiddenLayer.W ** 2).sum() \
-                    + (self.logRegressionLayer.W ** 2).sum()
+        self.L1 = 0
+        self.L2 = 0
+        for layer in self.layers:
+            self.L1 += abs(layer.W).sum()
+            self.L2 += (layer.W ** 2).sum()
 
         # negative log likelihood of the MLP is given by the negative
         # log likelihood of the output of the model, computed in the
-        # logistic regression layer
-        self.negative_log_likelihood = self.logRegressionLayer.negative_log_likelihood
+        # logistic regression (softmax) layer
+        self.nll = self.layers[-1].cost
         # same holds for the function computing the number of errors
-        self.errors = self.logRegressionLayer.errors
+        self.errors = self.layers[-1].cls_error
 
-        # the parameters of the model are the parameters of the two layer it is
-        # made out of
-        self.params = self.hiddenLayer.params + self.logRegressionLayer.params
-        self.y_pred = self.logRegressionLayer.y_pred
-
-
-def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
-             dataset='../data/mnist.pkl.gz', batch_size=20, n_hidden=500):
-    """
-    Demonstrate stochastic gradient descent optimization for a multilayer
-    perceptron
-
-    This is demonstrated on MNIST.
-
-    :type learning_rate: float
-    :param learning_rate: learning rate used (factor for the stochastic
-    gradient
-
-    :type L1_reg: float
-    :param L1_reg: L1-norm's weight when added to the cost (see
-    regularization)
-
-    :type L2_reg: float
-    :param L2_reg: L2-norm's weight when added to the cost (see
-    regularization)
-
-    :type n_epochs: int
-    :param n_epochs: maximal number of epochs to run the optimizer
-
-    :type dataset: string
-    :param dataset: the path of the MNIST dataset file from
-                 http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz
+        # Parameters of the model consist of the parameters in every
+        # layer (hidden and softmax output).
+        self.params = [ param for layer in self.layers
+                        for param in layer.params]
 
 
-   """
-    datasets = load_data(dataset)
+    def _init_with_dropout(self, rng, inputs, n_in, hidden_sizes, n_out,
+                           activation, dropout_p, maxout_k):
 
-    train_set_x, train_set_y = datasets[0]
-    valid_set_x, valid_set_y = datasets[1]
-    test_set_x, test_set_y = datasets[2]
+        try:
+            assert hidden_sizes[0] != 0
+        except:
+            raise AssertionError('You should not try dropout/maxout without '
+                                 ' hidden layers')
+        self.layers = []
+        self.dropout_layers = []
+        layer_sizes = [n_in] + hidden_sizes + [n_out]
+        weight_matrix_sizes = zip(layer_sizes, layer_sizes[1:])
 
-    # compute number of minibatches for training, validation and testing
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
+        next_layer_input = inputs
+        next_dropout_layer_input = DropoutHiddenLayer.apply_dropout(rng, inputs, 0.2)
+        # Construct all the layers (input+hidden) except the top logistic
+        # regression layer which is done afterwards.
+        for n_in, n_out in weight_matrix_sizes[:-1]:
+            if maxout_k == -1:
+                print 'building Dropout hidden layer of size (%d,%d)'%(
+                    n_in, n_out)
+                next_dropout_layer = DropoutHiddenLayer(rng=rng,
+                                input=next_dropout_layer_input,
+                                activation=activation, n_in=n_in,
+                                n_out=n_out, dropout_p=dropout_p
+                                )
+            else:
+                print 'building Maxout hidden layer of size (%d,%d)'%(
+                    n_in, n_out)
+                next_dropout_layer = MaxoutHiddenLayer(rng=rng,
+                                input=next_dropout_layer_input,
+                                activation=activation, n_in=n_in, n_out=n_out,
+                                dropout_p=dropout_p, maxout_k=maxout_k,
+                                )
+            self.dropout_layers.append(next_dropout_layer)
+            next_dropout_layer_input = next_dropout_layer.output
+            if maxout_k == -1:
+                next_layer = HiddenLayer(rng=rng,
+                                     input=next_layer_input,
+                                     activation=activation,
+                                     W=next_dropout_layer.W * 0.5,
+                                     b=next_dropout_layer.b,
+                                     n_in=n_in, n_out=n_out
+                                    )
+            else:
+                next_layer = MaxPoolingHiddenLayer(rng=rng,
+                                     input=next_layer_input,
+                                     activation=activation,
+                                     W=next_dropout_layer.W * 0.5,
+                                     b=next_dropout_layer.b,
+                                     n_in=n_in, n_out=n_out,
+                                     maxout_k=maxout_k
+                                    )
+            self.layers.append(next_layer)
+            next_layer_input = next_layer.output
+
+
+        # The logistic regression (softmax) layer.
+        n_in, n_out = weight_matrix_sizes[-1]
+        print 'building output layer of size (%d,%d)'%(n_in, n_out)
+        assert n_out == 10
+        print 'init softmax with NLL output layer...'
+        dropout_output_layer = SoftmaxOutputLayer(
+                        inputs=next_dropout_layer_input,
+                        n_in=n_in, n_out=n_out)
+
+        self.dropout_layers.append(dropout_output_layer)
+
+        # Again, reuse parameters in the dropout output.
+        # TODO: the number of ouput units is hardcoded to 10 for mnist.
+        assert n_out == 10
+        # Ouput layer is a softmax layer.
+        output_layer = SoftmaxOutputLayer(
+            inputs=next_layer_input,
+            W=dropout_output_layer.W * 0.5,
+            b=dropout_output_layer.b,
+            n_in=n_in, n_out=n_out)
+
+        self.layers.append(output_layer)
+
+        self.dropout_nll = self.dropout_layers[-1].cost
+        self.dropout_errors = self.dropout_layers[-1].cls_error
+
+        self.nll = self.layers[-1].cost
+        self.errors = self.layers[-1].cls_error
+
+        # Grab all the parameters together.
+        self.params = [ param for layer in self.dropout_layers
+                        for param in layer.params ]
+
+        self.L1 = 0
+        self.L2 = 0
+
+def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
+    print 'train_x shape: ', train_x.get_value(borrow=True).shape
+    print 'valid_x shape: ', valid_x.get_value(borrow=True).shape
+    print 'test_x shape: ', test_x.get_value(borrow=True).shape
+
+    # Compute number of minibatches for training, validation and testing.
+    n_train_batches = train_x.get_value(borrow=True).shape[0] / state.batch_size
+    n_valid_batches = valid_x.get_value(borrow=True).shape[0] / state.batch_size
+    n_test_batches = test_x.get_value(borrow=True).shape[0] / state.batch_size
+
+    # TODO: quiet display.
+    print 'number of train batches: ', n_train_batches
+    print 'number of valid batches: ', n_valid_batches
+    print 'number of test batches: ', n_test_batches
 
     ######################
     # BUILD ACTUAL MODEL #
     ######################
-    print '... building the model'
 
+    rng = numpy.random.RandomState(state.seed)
+
+    ####### THEANO VARIABLES #######
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a [mini]batch
     x = T.matrix('x')  # the data is presented as rasterized images
     y = T.ivector('y')  # the labels are presented as 1D vector of
                         # [int] labels
+    tepoch = T.iscalar()
+    tepoch.tag.test_value = 1
+    lr = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
+    lr_0 = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
+    new_lr = T.cast(lr_0 / (1.0 + state.decrease_constant*tepoch), 'float32')
 
-    rng = numpy.random.RandomState(1234)
+    # Regularization terms.
+    state.L1 = numpy.array(state.L1,dtype='float32')
+    state.L2 = numpy.array(state.L2,dtype='float32')
+    L1_reg = get_theano_constant(state.L1, 'float32', ())
+    L2_reg = get_theano_constant(state.L2, 'float32', ())
 
-    # construct the MLP class
-    classifier = MLP(rng=rng, input=x, n_in=28 * 28,
-                     n_hidden=n_hidden, n_out=10)
+    # Compute momentum for the current epoch.
+    if state.mom == 0:
+        # Do not use mom
+        print 'Momentum is not used.'
+        momentum = T.cast(state.mom * tepoch, 'float32')
+    else:
+        # TODO: find what is momentum and how it is computed.
+        # https://github.com/mdenil/dropout/blob/master/mlp.py
+        '''
+        momentum = theano.ifelse.ifelse(tepoch < 500,
+                    T.cast(state.mom*(1. - tepoch/500.) + 0.7*(tepoch/500.),
+                    'float32'),T.cast(0.7, 'float32'))
+        '''
+        momentum = theano.ifelse.ifelse(tepoch < 500,
+                    T.cast(state.mom*(1. - tepoch/500.) + 0.99*(tepoch/500.),
+                    'float32'),T.cast(0.99, 'float32'))
 
+    # end of theano variables initialization
+
+
+    ####### BUILDING THE MLP MODEL #######
+    # Construct the MLP class
+    # TODO: Input and output size hardcoded for mnist.
+    classifier = MLP(rng=rng, inputs=x, n_in=28 * 28,
+                        hidden_sizes=state.hidden_sizes, n_out=10,
+                        activation=state.activation, dropout_p=state.dropout_p,
+                        maxout_k=state.maxout_k)
+
+
+    ####### Cost functions #######
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
+    """
     cost = classifier.negative_log_likelihood(y) \
-         + L1_reg * classifier.L1 \
-         + L2_reg * classifier.L2_sqr
+        + state.L1 * classifier.L1 \
+        + state.L2 * classifier.L2_sqr
+    """
+    ### Cost function + regularization terms. ###
+    cost_reg = L1_reg * classifier.L1 + L2_reg * classifier.L2
+    if state.dropout_p != -1 or state.maxout_k != -1:
+        cost_train = classifier.dropout_nll(y)
+        cost_valid = classifier.nll(y)
+    else:
+        cost_train = classifier.nll(y)
+        cost_valid = classifier.nll(y)
 
-    # compiling a Theano function that computes the mistakes that are made
-    # by the model on a minibatch
-    test_model = theano.function(inputs=[index],
-            outputs=classifier.errors(y),
-            givens={
-                x: test_set_x[index * batch_size:(index + 1) * batch_size],
-                y: test_set_y[index * batch_size:(index + 1) * batch_size]})
+    cost = cost_reg + cost_train
+    train_fn_output = [cost_train, cost_reg]
 
-    validate_model = theano.function(inputs=[index],
-            outputs=classifier.errors(y),
-            givens={
-                x: valid_set_x[index * batch_size:(index + 1) * batch_size],
-                y: valid_set_y[index * batch_size:(index + 1) * batch_size]})
+    # end of cost function
 
-    # compute the gradient of cost with respect to theta (sotred in params)
-    # the resulting gradients will be stored in a list gparams
+
+    ### Gradient of cost w.r.t. parameters ###
+    # Compute the gradient of cost with respect to theta (stored in params).
+    # The resulting gradients will be stored in a list gparams.
     gparams = []
     for param in classifier.params:
         gparam = T.grad(cost, param)
         gparams.append(gparam)
 
-    # specify how to update the parameters of the model as a list of
-    # (variable, update expression) pairs
-    updates = []
+    # ... and allocate memory for momentum'd versions of the gradient
+    gparams_mom = []
+    for param in classifier.params:
+        gparam_mom = theano.shared(
+            numpy.zeros(param.get_value(borrow=True).shape,
+            dtype=theano.config.floatX))
+        gparams_mom.append(gparam_mom)
+
+    # end of gradient of cost
+
+
+    ### Updates rules for parameters ###
+    # Specify how to update the parameters of the model as a list of
+    # (variable, update expression) pairs.
+    #updates = []
+    updates = collections.OrderedDict()
     # given two list the zip A = [a1, a2, a3, a4] and B = [b1, b2, b3, b4] of
     # same length, zip generates a list C of same size, where each element
     # is a pair formed from the two lists :
     #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-    for param, gparam in zip(classifier.params, gparams):
-        updates.append((param, param - learning_rate * gparam))
+    #for param, gparam in zip(classifier.params, gparams):
+    #    updates.append((param, param - lr * gparam))
+
+    # Update the step direction using momentum
+    # TODO: not need to include in the zip the init_lr.
+    for gparam_mom, gparam, i in zip(gparams_mom, gparams, range(len(state.init_lr))):
+        # the following is not consistent with Hinton's paper
+        updates[gparam_mom] = momentum * gparam_mom + (1. - momentum) * gparam
+
+    # ... and take a step along that direction
+    for param, gparam_mom, gparam, i in zip(classifier.params, gparams_mom,
+                                            gparams, range(len(state.init_lr))):
+        # the following is not consistent with Hinton's paper
+        # TODO: check this equation:
+        stepped_param = param - lr[i] * gparam_mom
+        #stepped_param = param - (1. - momentum) * lr[i] * gparam_mom
+
+        # This is a silly hack to constrain the norms of the rows of the weight
+        # matrices. This just checks if there are two dimensions to the
+        # parameter and constrains it if so... maybe this is a bit silly but it
+        # should work for now.
+        # TODO: test this norms constraint.
+        if param.get_value(borrow=True).ndim == 2:
+            squared_norms = T.sum(stepped_param**2, axis=1).reshape((
+                stepped_param.shape[0],1))
+            scale = T.clip(T.sqrt(state.filter_square_limit / squared_norms), 0., 1.)
+            updates[param] = stepped_param * scale
+        else:
+            updates[param] = stepped_param
+
+    # end of updates
+
+
+    ####### THEANO FUNCTIONS #######
+    print 'Compiling theano functions...'
+    t0 = time.time()
+
+    momentum_fn = theano.function(inputs=[tepoch],
+                            outputs=T.as_tensor_variable(momentum),
+                            name='returns new momentum')
+
+    # use 1/t decay where t is epoch
+    decay_learning_rate_fn = theano.function(inputs=[tepoch],
+            outputs=T.as_tensor_variable(lr),
+            name='decay learning rate with 1/t',
+            updates=collections.OrderedDict({lr: new_lr}))
 
     # compiling a Theano function `train_model` that returns the cost, but
     # in the same time updates the parameter of the model based on the rules
     # defined in `updates`
-    train_model = theano.function(inputs=[index], outputs=cost,
+    train_model_on_batch_fn = theano.function(inputs=[index, tepoch], outputs=train_fn_output,
             updates=updates,
+            name='computes the train cost with params updates',
             givens={
-                x: train_set_x[index * batch_size:(index + 1) * batch_size],
-                y: train_set_y[index * batch_size:(index + 1) * batch_size]})
+                x: train_x[index * state.batch_size:(index + 1) * state.batch_size],
+                y: train_y[index * state.batch_size:(index + 1) * state.batch_size]})
+
+
+    # Classification errors and NLL functions.
+    train_error_and_cost_on_batch_fn = theano.function(inputs=[index],
+        outputs=[classifier.errors(y), cost_train],
+        name='returns train classification errors and NLL for a given mini-batch',
+        givens={
+            x: train_x[index * state.batch_size:(index + 1) * state.batch_size],
+            y: train_y[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    valid_error_and_cost_on_batch_fn = theano.function(inputs=[index],
+            outputs=[classifier.errors(y), cost_valid],
+            name='returns validation classification errors and NLL for a given mini-batch',
+            givens={
+                x: valid_x[index * state.batch_size:(index + 1) * state.batch_size],
+                y: valid_y[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    test_error_and_cost_on_batch_fn = theano.function(inputs=[index],
+            outputs=[classifier.errors(y), cost_valid],
+            name='returns test classification errors and NLL for a given mini-batch',
+            givens={
+                x: test_x[index * state.batch_size:(index + 1) * state.batch_size],
+                y: test_y[index * state.batch_size:(index + 1) * state.batch_size]})
+
+
+    # NNET outputs.
+    train_output_on_batch_fn = theano.function(inputs=[index],
+        outputs=[classifier.layers[-1].p_y_given_x],
+        name='returns train nnet output for a given mini-batch',
+        givens={
+            x: train_x[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    valid_output_on_batch_fn = theano.function(inputs=[index],
+            outputs=classifier.layers[-1].p_y_given_x,
+            name='returns validation nnet output for a given mini-batch',
+            givens={
+                x: valid_x[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    test_output_on_batch_fn = theano.function(inputs=[index],
+            outputs=classifier.layers[-1].p_y_given_x,
+            name='returns test nnet output for a given mini-batch',
+            givens={
+                x: test_x[index * state.batch_size:(index + 1) * state.batch_size]})
+
+
+    # Predictions and Targets functions.
+    train_pred_and_targ_on_batch_fn = theano.function(inputs=[index],
+            outputs=[classifier.layers[-1].y_pred,
+                        train_y[index * state.batch_size:(index + 1) * state.batch_size]],
+            name='returns the train predictions and targets for a given mini-batch',
+            givens={
+                x: train_x[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    valid_pred_and_targ_on_batch_fn = theano.function(inputs=[index],
+            outputs=[classifier.layers[-1].y_pred,
+                        valid_y[index * state.batch_size:(index + 1) * state.batch_size]],
+            name='returns the validation predictions and targets for a given mini-batch',
+            givens={
+                x: valid_x[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    test_pred_and_targ_on_batch_fn = theano.function(inputs=[index],
+            outputs=[classifier.layers[-1].y_pred,
+                    test_y[index * state.batch_size:(index + 1) * state.batch_size]],
+            name='returns the test predictions and targets for a given minbi-batch',
+            givens={
+                x: test_x[index * state.batch_size:(index + 1) * state.batch_size]})
+
+    t1 = time.time()
+    print 'Compilation takes %d seconds' %(t1-t0)
+
+    # end of theano functions compilation
+
 
     ###############
     # TRAIN MODEL #
     ###############
     print '... training'
-
-    # early-stopping parameters
-    patience = 10000  # look as this many examples regardless
-    patience_increase = 2  # wait this much longer when a new best is
-                           # found
-    improvement_threshold = 0.995  # a relative improvement of this much is
-                                   # considered significant
-    validation_frequency = min(n_train_batches, patience / 2)
-                                  # go through this many
-                                  # minibatche before checking the network
-                                  # on the validation set; in this case we
-                                  # check every epoch
+    validation_frequency = min(n_train_batches, state.patience / 2)
+                                # go through this many
+                                # minibatches before checking the network
+                                # on the validation set; in this case we
+                                # check every epoch
 
     best_params = None
     best_validation_loss = numpy.inf
     best_iter = 0
+    best_epoch = 0
     test_score = 0.
     start_time = time.clock()
 
     epoch = 0
     done_looping = False
 
-    while (epoch < n_epochs) and (not done_looping):
-        epoch = epoch + 1
-        for minibatch_index in xrange(n_train_batches):
+    all_train_losses = {}
+    all_valid_losses = {}
+    all_test_losses = {}
+    all_train_costs_with_reg = {}
+    # Train costs with NO regularization.
+    all_train_costs_without_reg = {}
+    all_valid_costs = {}
+    all_test_costs = {}
+    # Best validation and test nnet outputs (vector of probabilities).
+    best_valid_p_y_given_x = []
+    best_test_p_y_given_x = []
 
-            minibatch_avg_cost = train_model(minibatch_index)
-            # iteration number
-            iter = (epoch - 1) * n_train_batches + minibatch_index
+    vpredictions = []
+    tpredictions = []
 
-            if (iter + 1) % validation_frequency == 0:
-                # compute zero-one loss on validation set
-                validation_losses = [validate_model(i) for i
-                                     in xrange(n_valid_batches)]
-                this_validation_loss = numpy.mean(validation_losses)
+    print 'Initial learning rate: ', state.init_lr
+    if state.lr_decay:
+        print 'Learning decay enabled'
+    else:
+        print 'No learning decay!'
 
-                print('epoch %i, minibatch %i/%i, validation error %f %%' %
-                     (epoch, minibatch_index + 1, n_train_batches,
-                      this_validation_loss * 100.))
+    print 'C-c to skip'
+    try:
+        while (epoch < state.n_epochs) and (not done_looping):
+            train_costs_with_reg = []
+            train_costs_without_reg = []
+            train_losses = []
+            for minibatch_index in xrange(n_train_batches):
 
-                # if we got the best validation score until now
-                if this_validation_loss < best_validation_loss:
-                    #improve patience if loss improvement is good enough
-                    if this_validation_loss < best_validation_loss *  \
-                           improvement_threshold:
-                        patience = max(patience, iter * patience_increase)
+                # Train cost with regularization.
+                minibatch_avg_cost = sum(train_model_on_batch_fn(minibatch_index, epoch))
+                train_costs_with_reg.append(minibatch_avg_cost)
 
-                    best_validation_loss = this_validation_loss
-                    best_iter = iter
+                if state.save_losses_and_costs:
+                    # Train costs with no regularization.
+                    train_error, train_cost = train_error_and_cost_on_batch_fn(minibatch_index)
+                    train_losses.append(train_error)
+                    train_costs_without_reg.append(train_cost)
 
-                    # test it on the test set
-                    test_losses = [test_model(i) for i
-                                   in xrange(n_test_batches)]
-                    test_score = numpy.mean(test_losses)
+                # iteration number
+                iter = epoch * n_train_batches + minibatch_index
 
-                    print(('     epoch %i, minibatch %i/%i, test error of '
-                           'best model %f %%') %
-                          (epoch, minibatch_index + 1, n_train_batches,
-                           test_score * 100.))
+                if (iter + 1) % validation_frequency == 0:
+                    # compute zero-one loss and the nll on the validation set.
+                    v_losses = []
+                    v_costs = []
+                    for i in xrange(n_valid_batches):
+                        loss, cost = valid_error_and_cost_on_batch_fn(i)
+                        v_losses.append(loss)
+                        v_costs.append(cost)
 
-            if patience <= iter:
+                    this_validation_loss = numpy.mean(v_losses)
+                    this_validation_cost = numpy.mean(v_costs)
+
+                    if state.save_losses_and_costs:
+                        all_valid_losses.setdefault(epoch, 0)
+                        all_valid_losses[epoch] = this_validation_loss
+
+                        all_valid_costs.setdefault(epoch, 0)
+                        all_valid_costs[epoch] = this_validation_cost
+
+                    print('epoch %i, minibatch %i/%i, validation error %f %%' %
+                        (epoch, minibatch_index + 1, n_train_batches,
+                        this_validation_loss * 100.))
+
+                    # if we got the best validation score until now
+                    if this_validation_loss < best_validation_loss:
+                        # improve patience if loss improvement is good enough
+                        if this_validation_loss < best_validation_loss *  \
+                            state.improvement_threshold:
+                            state.patience = max(state.patience, iter * state.patience_increase)
+
+                        best_validation_loss = this_validation_loss
+                        v_p_y_given_x = []
+                        for i in xrange(n_valid_batches):
+                            p_y_given_x = valid_output_on_batch_fn(i)
+                            v_p_y_given_x.append(p_y_given_x)
+
+                        best_valid_p_y_given_x = v_p_y_given_x
+
+                        if state.save_model_info:
+                            # Best predictions on validation set.
+                            valid_pred_and_targ = numpy.array([valid_pred_and_targ_on_batch_fn(i) for i in xrange(n_valid_batches)])
+
+                        best_iter = iter
+                        best_epoch = epoch
+
+                        # test it on the test set
+                        # compute zero-one loss and the nll on the test set.
+                        t_losses = []
+                        t_costs = []
+                        t_p_y_given_x = []
+
+                        for i in xrange(n_test_batches):
+                            loss, cost = test_error_and_cost_on_batch_fn(i)
+                            p_y_given_x = test_output_on_batch_fn(i)
+                            t_losses.append(loss)
+                            t_costs.append(cost)
+                            t_p_y_given_x.append(p_y_given_x)
+
+                        test_score = numpy.mean(t_losses)
+                        this_test_cost = numpy.mean(t_costs)
+                        best_test_p_y_given_x = t_p_y_given_x
+
+                        if state.save_losses_and_costs:
+                            all_test_losses.setdefault(epoch, 0)
+                            all_test_losses[epoch] = test_score
+
+                            all_test_costs.setdefault(epoch, 0)
+                            all_test_costs[epoch] = this_test_cost
+
+                        if state.save_model_info:
+                            # Best predictions on test set.
+                            test_pred_and_targ = numpy.array([test_pred_and_targ_on_batch_fn(i) for i in xrange(n_test_batches)])
+
+                        print(('     epoch %i, minibatch %i/%i, test error of '
+                            'best model %f %%') %
+                            (epoch, minibatch_index + 1, n_train_batches,
+                            test_score * 100.))
+
+                if state.patience <= iter:
                     done_looping = True
                     break
 
+            # Update learning rate.
+            if state.lr_decay:
+                new_learning_rate = decay_learning_rate_fn(epoch)
+                print 'New learning rate: ', lr.get_value()
+
+            # Update momentum.
+            new_momentum = momentum_fn(epoch)
+            print 'New momentum: ', new_momentum
+
+            if state.save_losses_and_costs:
+                all_train_costs_with_reg.setdefault(epoch, 0)
+                all_train_costs_with_reg[epoch] = numpy.mean(train_costs_with_reg)
+                all_train_costs_without_reg.setdefault(epoch, 0)
+                all_train_costs_without_reg[epoch] = numpy.mean(train_costs_without_reg)
+                all_train_losses.setdefault(epoch, 0)
+                all_train_losses[epoch] = numpy.mean(train_losses)
+
+            # Update epoch counter.
+            epoch = epoch + 1
+    except KeyboardInterrupt:
+        print '\n\nskip !'
+
     end_time = time.clock()
     print(('Optimization complete. Best validation score of %f %% '
-           'obtained at iteration %i, with test performance %f %%') %
-          (best_validation_loss * 100., best_iter + 1, test_score * 100.))
+        'obtained at iteration %i (epoch %i), with test performance %f %%') %
+        (best_validation_loss * 100., best_iter + 1, best_epoch,test_score * 100.))
     print >> sys.stderr, ('The code for file ' +
-                          os.path.split(__file__)[1] +
-                          ' ran for %.2fm' % ((end_time - start_time) / 60.))
+                        os.path.split(__file__)[1] +
+                        ' ran for %.2fm' % ((end_time - start_time) / 60.))
 
 
-if __name__ == '__main__':
-    test_mlp()
+    if state.save_model:
+        # Save the model.
+        print 'Saving model not implemented.'
+
+    if state.save_model_info:
+        # Save the model valid/test predictions and targets.
+        print 'Saving the model predictions and targets'
+        path = '%s_pred_and_targ.npz'%state.model
+        valid_pred = valid_pred_and_targ[:,0,:]
+        valid_targ = valid_pred_and_targ[:,1,:]
+        test_pred = test_pred_and_targ[:,0,:]
+        test_targ = test_pred_and_targ[:,1,:]
+        numpy.savez_compressed(path, valid_pred=valid_pred,
+                                     valid_targ=valid_targ,
+                                     test_pred=test_pred,
+                                     test_targ=test_targ)
+
+    if state.save_losses_and_costs:
+        print 'Saving losses and costs'
+        path = '%s_losses.npz'%state.model
+        numpy.savez_compressed(path, all_train_losses=all_train_losses,
+                                     all_valid_losses=all_valid_losses,
+                                     all_test_losses=all_test_losses)
+
+        path = '%s_costs.npz'%state.model
+        numpy.savez(path, train_costs_with_reg=all_train_costs_with_reg,
+                          train_costs_without_reg=all_train_costs_without_reg,
+                          valid_costs=all_valid_costs,
+                          test_costs=all_test_costs)
+
+    try:
+        channel.save()
+    except:
+        print 'Not in experiment, done!'
+
+    return 0

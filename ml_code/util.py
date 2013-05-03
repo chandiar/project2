@@ -48,6 +48,17 @@ def get_dataset_base_path():
         return data_dir
 
 
+def get_theano_constant(constant, dtype, bc_pattern):
+    # usage: dtype = 'float32', bc_pattern='()'
+    # see http://deeplearning.net/software/theano/library/tensor/basic.html for details.
+    try:
+        rval = theano.tensor.TensorConstant(theano.tensor.TensorType(dtype,
+                            broadcastable=bc_pattern), numpy.asarray(constant, 'float32'))
+    except TypeError:
+        import ipdb; ipdb.set_trace()
+    return rval
+
+
 def load_pkl(path):
     """
     Load a pickled file.

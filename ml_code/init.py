@@ -5,7 +5,7 @@
 # TO check if the gpu is being used:
 # nvidia-smi
 
-import collections, cPickle, os, sys, time
+import os, sys, time
 import numpy
 import sklearn
 from sklearn.datasets import fetch_mldata
@@ -15,10 +15,10 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC, LinearSVC
 from sklearn import cross_validation
 import theano
-from theano import tensor as T
 
 # Local imports
-from mlp import MLP
+import mlp
+import cnn
 import util
 from util import dump_tar_bz2, load_data
 
@@ -84,12 +84,16 @@ def main(state, channel):
 
     data_path = os.path.join(data_dir, 'mnist.pkl.gz')
     print 'Loading the MNIST dataset from %s' %data_path
-    if state.model == 'nnet':
+    if state.model in ['nnet', 'cnn']:
         state.gpu = True
+        print 'GPU should be enabled'
+    # TODO: check how to retrieve the gpu status.
     if state.gpu:
-        print 'GPU enabled'
+        #print 'GPU enabled'
+        print 'Loading dataset in shared variables'
     else:
-        print 'GPU disabled'
+        #print 'GPU disabled'
+        print 'Loading dataset in numpy array'
     datasets = load_data(data_path, splits=[train_size, valid_size, test_size], shared=state.gpu)
 
     train_x, train_y = datasets[0]
@@ -117,9 +121,11 @@ def main(state, channel):
     '''
 
     if state.model == 'nnet':
-        train_mlp(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+        status = mlp.train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+    elif state.model == 'cnn':
+        status = cnn.train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
     else:
-        train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
+        status = train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
 
     stop = time.time()
     print 'It took %s minutes'%( (stop-start) / float(60) )
@@ -127,347 +133,6 @@ def main(state, channel):
     if state.save_state:
         print 'We will save the experiment state'
         dump_tar_bz2(state, 'state.tar.bz2')
-
-    return 0
-
-
-def train_mlp(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
-    print 'train_x shape: ', train_x.get_value(borrow=True).shape
-    #print 'train_y shape: ', train_y.get_value(borrow=True).shape
-    print 'valid_x shape: ', valid_x.get_value(borrow=True).shape
-    #print 'valid_y shape: ', valid_y.get_value(borrow=True).shape
-    print 'test_x shape: ', test_x.get_value(borrow=True).shape
-    #print 'test_y shape: ', test_y.get_value(borrow=True).shape
-
-    if state.model == 'nnet':
-        # compute number of minibatches for training, validation and testing
-        n_train_batches = train_x.get_value(borrow=True).shape[0] / state.batch_size
-        n_valid_batches = valid_x.get_value(borrow=True).shape[0] / state.batch_size
-        n_test_batches = test_x.get_value(borrow=True).shape[0] / state.batch_size
-
-        # TODO: quiet display.
-        print 'number of train batches: ', n_train_batches
-        print 'number of valid batches: ', n_valid_batches
-        print 'number of test batches: ', n_test_batches
-
-        ######################
-        # BUILD ACTUAL MODEL #
-        ######################
-        print '... building the model'
-
-        # allocate symbolic variables for the data
-        index = T.lscalar()  # index to a [mini]batch
-        x = T.matrix('x')  # the data is presented as rasterized images
-        y = T.ivector('y')  # the labels are presented as 1D vector of
-                            # [int] labels
-        tepoch = T.iscalar()
-        #tepoch.tag.test_value = 1
-        lr = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
-        lr_0 = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
-
-        rng = numpy.random.RandomState(state.seed)
-        # construct the MLP class
-        classifier = MLP(rng=rng, input=x, n_in=28 * 28,
-                        n_hidden=state.n_hidden, n_out=10)
-
-        # the cost we minimize during training is the negative log likelihood of
-        # the model plus the regularization terms (L1 and L2); cost is expressed
-        # here symbolically
-        cost = classifier.negative_log_likelihood(y) \
-            + state.L1 * classifier.L1 \
-            + state.L2 * classifier.L2_sqr
-
-        # compiling a Theano function that computes the mistakes that are made
-        # by the model on a minibatch
-        test_model = theano.function(inputs=[index],
-                outputs=classifier.errors(y),
-                givens={
-                    x: test_x[index * state.batch_size:(index + 1) * state.batch_size],
-                    y: test_y[index * state.batch_size:(index + 1) * state.batch_size]})
-
-        validate_model = theano.function(inputs=[index],
-                outputs=classifier.errors(y),
-                givens={
-                    x: valid_x[index * state.batch_size:(index + 1) * state.batch_size],
-                    y: valid_y[index * state.batch_size:(index + 1) * state.batch_size]})
-
-        # compute the gradient of cost with respect to theta (stored in params)
-        # the resulting gradients will be stored in a list gparams
-        gparams = []
-        for param in classifier.params:
-            gparam = T.grad(cost, param)
-            gparams.append(gparam)
-
-        # specify how to update the parameters of the model as a list of
-        # (variable, update expression) pairs
-        updates = []
-        # given two list the zip A = [a1, a2, a3, a4] and B = [b1, b2, b3, b4] of
-        # same length, zip generates a list C of same size, where each element
-        # is a pair formed from the two lists :
-        #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-        for param, gparam in zip(classifier.params, gparams):
-            updates.append((param, param - lr * gparam))
-
-        new_lr = T.cast(lr_0 / (1.0 + state.decrease_constant*tepoch), 'float32')
-        # use 1/t decay where t is epoch
-        decay_learning_rate_fn = theano.function(inputs=[tepoch],
-                outputs=T.as_tensor_variable(lr),
-                name='decay learning rate with 1/t',
-                updates=collections.OrderedDict({lr: new_lr}))
-
-        # compiling a Theano function `train_model` that returns the cost, but
-        # in the same time updates the parameter of the model based on the rules
-        # defined in `updates`
-        train_model = theano.function(inputs=[index], outputs=cost,
-                updates=updates,
-                givens={
-                    x: train_x[index * state.batch_size:(index + 1) * state.batch_size],
-                    y: train_y[index * state.batch_size:(index + 1) * state.batch_size]})
-
-        if state.save_losses:
-            get_train_error = theano.function(inputs=[index],
-                outputs=classifier.errors(y),
-                givens={
-                    x: train_x[index * state.batch_size:(index + 1) * state.batch_size],
-                    y: train_y[index * state.batch_size:(index + 1) * state.batch_size]})
-
-        if state.save_model_info:
-            get_train_targ = theano.function(inputs=[index],
-                    outputs=train_y[index * state.batch_size:(index + 1) * state.batch_size])
-            get_train_pred = theano.function(inputs=[index],
-                    outputs=classifier.y_pred,
-                    givens={
-                        x: train_x[index * state.batch_size:(index + 1) * state.batch_size]})
-
-            get_valid_targ = theano.function(inputs=[index],
-                    outputs=valid_y[index * state.batch_size:(index + 1) * state.batch_size])
-            get_valid_pred = theano.function(inputs=[index],
-                    outputs=classifier.y_pred,
-                    givens={
-                        x: valid_x[index * state.batch_size:(index + 1) * state.batch_size]})
-
-            get_test_targ = theano.function(inputs=[index],
-                    outputs=test_y[index * state.batch_size:(index + 1) * state.batch_size])
-            get_test_pred = theano.function(inputs=[index],
-                    outputs=classifier.y_pred,
-                    givens={
-                        x: test_x[index * state.batch_size:(index + 1) * state.batch_size]})
-
-        if state.save_costs:
-            get_train_cost = theano.function(inputs=[index],
-                    outputs=cost,
-                    givens={
-                        x: train_x[index * state.batch_size:(index + 1) * state.batch_size],
-                        y: train_y[index * state.batch_size:(index + 1) * state.batch_size]})
-            get_valid_cost = theano.function(inputs=[index],
-                    outputs=classifier.negative_log_likelihood(y),
-                    givens={
-                        x: valid_x[index * state.batch_size:(index + 1) * state.batch_size],
-                        y: valid_y[index * state.batch_size:(index + 1) * state.batch_size]})
-            get_test_cost = theano.function(inputs=[index],
-                    outputs=classifier.negative_log_likelihood(y),
-                    givens={
-                        x: test_x[index * state.batch_size:(index + 1) * state.batch_size],
-                        y: test_y[index * state.batch_size:(index + 1) * state.batch_size]})
-
-        ###############
-        # TRAIN MODEL #
-        ###############
-        print '... training'
-
-        # early-stopping parameters
-        state.patience = 10000  # look as this many examples regardless
-        state.patience_increase = 2  # wait this much longer when a new best is
-                            # found
-        state.improvement_threshold = 0.995  # a relative improvement of this much is
-                                    # considered significant
-        validation_frequency = min(n_train_batches, state.patience / 2)
-                                    # go through this many
-                                    # minibatches before checking the network
-                                    # on the validation set; in this case we
-                                    # check every epoch
-
-        best_params = None
-        best_validation_loss = numpy.inf
-        best_iter = 0
-        best_epoch = 0
-        test_score = 0.
-        start_time = time.clock()
-
-        epoch = 0
-        done_looping = False
-
-        all_train_losses = {}
-        all_valid_losses = {}
-        all_test_losses = {}
-        all_train_costs = {}
-        all_valid_costs = {}
-        all_test_costs = {}
-
-        vpredictions = []
-        tpredictions = []
-
-        print 'Initial learning rate: ', state.init_lr
-        if state.lr_decay:
-            print 'Learning decay enabled'
-        else:
-            print 'No learning decay!'
-        while (epoch < state.n_epochs) and (not done_looping):
-            train_costs = []
-            train_losses = []
-            for minibatch_index in xrange(n_train_batches):
-
-                minibatch_avg_cost = train_model(minibatch_index)
-                train_costs.append(minibatch_avg_cost)
-
-                if state.save_losses:
-                    train_losses.append(get_train_error(minibatch_index))
-
-                '''
-                train_pred = numpy.array(get_train_pred(minibatch_index))
-                train_targ = numpy.array(get_train_targ(minibatch_index))
-                train_errors = 1 - (sum(train_pred==train_targ)/ float(len(train_targ)))
-                '''
-
-                # iteration number
-                iter = epoch * n_train_batches + minibatch_index
-
-                if (iter + 1) % validation_frequency == 0:
-                    # compute zero-one loss on validation set
-                    validation_losses = [validate_model(i) for i
-                                        in xrange(n_valid_batches)]
-                    this_validation_loss = numpy.mean(validation_losses)
-
-                    if state.save_losses:
-                        all_valid_losses.setdefault(epoch, [])
-                        all_valid_losses[epoch].append(this_validation_loss)
-
-                    if state.save_costs:
-                        # Compute the nll on the validation set.
-                        validation_costs = [get_valid_cost(i) for i
-                                            in xrange(n_valid_batches)]
-                        this_validation_cost = numpy.mean(validation_costs)
-                        all_valid_costs.setdefault(epoch, [])
-                        all_valid_costs[epoch].append(this_validation_cost)
-
-                    print('epoch %i, minibatch %i/%i, validation error %f %%' %
-                        (epoch, minibatch_index + 1, n_train_batches,
-                        this_validation_loss * 100.))
-
-                    # if we got the best validation score until now
-                    if this_validation_loss < best_validation_loss:
-                        # improve patience if loss improvement is good enough
-                        if this_validation_loss < best_validation_loss *  \
-                            state.improvement_threshold:
-                            state.patience = max(state.patience, iter * state.patience_increase)
-
-                        best_validation_loss = this_validation_loss
-                        if state.save_model_info:
-                            # Best predictions on validation set.
-                            valid_pred = numpy.array([get_valid_pred(i) for i in xrange(n_valid_batches)]).flatten()
-                            valid_targ = numpy.array([get_valid_targ(i) for i in xrange(n_valid_batches)]).flatten()
-
-                        best_iter = iter
-                        best_epoch = epoch
-
-                        # test it on the test set
-                        test_losses = [test_model(i) for i
-                                    in xrange(n_test_batches)]
-                        test_score = numpy.mean(test_losses)
-
-                        if state.save_losses:
-                            all_test_losses.setdefault(epoch, [])
-                            all_test_losses[epoch].append(test_score)
-
-                        if state.save_costs:
-                            # Compute the nll on the test set.
-                            test_costs = [get_test_cost(i) for i
-                                                in xrange(n_test_batches)]
-                            this_test_cost = numpy.array(test_costs).mean()
-                            all_test_costs.setdefault(epoch, [])
-                            all_test_costs[epoch].append(this_test_cost)
-
-                        if state.save_model_info:
-                            # Best predictions on test set.
-                            test_pred = numpy.array([get_test_pred(i) for i in xrange(n_test_batches)]).flatten()
-                            test_targ = numpy.array([get_test_targ(i) for i in xrange(n_test_batches)]).flatten()
-
-                        print(('     epoch %i, minibatch %i/%i, test error of '
-                            'best model %f %%') %
-                            (epoch, minibatch_index + 1, n_train_batches,
-                            test_score * 100.))
-
-                if state.patience <= iter:
-                    done_looping = True
-                    break
-
-            # Update learning rate.
-            if state.lr_decay:
-                new_learning_rate = decay_learning_rate_fn(epoch)
-                print 'New learning rate: ', lr.get_value()
-            epoch = epoch + 1
-
-            if state.save_costs:
-                all_train_costs.setdefault(epoch, [])
-                all_train_costs[epoch].append(numpy.mean(train_costs))
-
-            if state.save_losses:
-                all_train_losses.setdefault(epoch, [])
-                all_train_losses[epoch].append(numpy.mean(train_losses))
-
-        end_time = time.clock()
-        print(('Optimization complete. Best validation score of %f %% '
-            'obtained at iteration %i (epoch %i), with test performance %f %%') %
-            (best_validation_loss * 100., best_iter + 1, best_epoch,test_score * 100.))
-        print >> sys.stderr, ('The code for file ' +
-                            os.path.split(__file__)[1] +
-                            ' ran for %.2fm' % ((end_time - start_time) / 60.))
-    else:
-        raise NotImplementedError('Model %s not supported.'%state.model)
-
-    if state.save_model:
-        # Save the model.
-        '''
-        print 'Pickling the model'
-        path = '%s.tar.bz2'%state.model
-        dump_tar_bz2(classifier, path)
-        '''
-        print 'Saving model not implemented.'
-
-    if state.save_model_info:
-        # Save the model valid/test predictions and targets.
-        model_info = {'validation': { 'predictions': valid_pred,
-                                      'targets'    : valid_targ },
-                      'test'      : { 'predictions': test_pred,
-                                      'targets'    : test_targ }
-                     }
-
-        print 'Saving the model info'
-        path = '%s_info.tar.bz2'%state.model
-        dump_tar_bz2(model_info, path)
-
-    if state.save_losses:
-        print 'Saving train losses'
-        path = '%s_losses.tar.bz2'%state.model
-        dump_tar_bz2({'train_losses': all_train_losses,
-                      'valid_losses': all_valid_losses,
-                      'test_losses': all_test_losses
-                      },
-                     path)
-
-    if state.save_costs:
-        print 'Saving train costs'
-        path = '%s_costs.tar.bz2'%state.model
-        dump_tar_bz2({'train_costs': all_train_costs,
-                      'valid_costs': all_valid_costs,
-                      'test_costs': all_test_costs
-                      },
-                     path)
-
-    try:
-        channel.save()
-    except:
-        print 'Not in experiment, done!'
 
     return 0
 
@@ -590,13 +255,14 @@ def experiment(state, channel):
 
 if __name__ == '__main__':
     from jobman import DD, expand
-    args = {'model'             : 'nnet',
+    # TODO: use jobman DD instead of dictionnary.
+    args = {'model'             : 'cnn',
+            # TODO: add 'model_type' option.
             'dataset'           : 'mnist',
             'save_model_info'   : True,
             'save_model'        : False,
             'save_state'        : False,
-            'save_losses'       : True,
-            'save_costs'        : True,
+            'save_losses_and_costs' : True,
             # If using gpu, we will load the dataset
             # as a shared variable.
             'gpu'               : False,
@@ -625,9 +291,15 @@ if __name__ == '__main__':
             'seed'              : 1234,
             'batch_size'        : 100,
             'lr_decay'          : True,
-            'init_lr'           : 1e-1,
+            'init_lr'           : [1e-1, 1e-1]*2,
             'decrease_constant' : 1e-3,
             'n_epochs'          : 1000,
+            # Set dropout_p and maxout_k to -1 to not use them.
+            'dropout_p'         : 0.5,
+            'maxout_k'          : 2,
+            # Set mom to 0 to not use momentum.
+            'mom'               : 0.5,
+            'filter_square_limit'   : 15.0,
             # Top layer output activation.
             'output_activation' : 'softmax',
             # Early-stopping.
@@ -642,11 +314,13 @@ if __name__ == '__main__':
             'L2'                : 1e-5,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            #'hidden_sizes'      : [2500, 1000],
-            'n_hidden'            : 1000,
+            'hidden_sizes'      : [500, 500],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
-            'hidden_activation' : 'tanh',
+            'activation' : 'tanh',
+            ### cnn ###
+            # Number of filters.
+            'nkerns'            : [20, 50],
             }
 
     '''
