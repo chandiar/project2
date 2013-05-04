@@ -277,7 +277,7 @@ if __name__ == '__main__':
             ### knn ###
             'n_neighbors'       : 30,
             ### svm and lsvm ###
-            'C'                 : 100,
+            'C'                 : 1,
             'kernel'            : 'rbf',
             'degree'            : 3,
             'gamma'             : 0,
