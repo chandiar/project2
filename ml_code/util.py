@@ -165,3 +165,50 @@ def load_data(dataset, splits=[50000, 10000, 10000], shared=False):
             (test_set_x, test_set_y)]
     return rval
 
+
+def save_model_info(model_name, valid_pred_and_targ, test_pred_and_targ,
+                    valid_p_y_given_x, test_p_y_given_x):
+
+    print 'Saving the best model predictions and targets'
+    path = '%s_pred_and_targ.npz'%model_name
+    valid_pred = valid_pred_and_targ[:,0,:]
+    valid_targ = valid_pred_and_targ[:,1,:]
+    test_pred = test_pred_and_targ[:,0,:]
+    test_targ = test_pred_and_targ[:,1,:]
+    numpy.savez_compressed(path, valid_pred=valid_pred,
+                                 valid_targ=valid_targ,
+                                 test_pred=test_pred,
+                                 test_targ=test_targ)
+
+    print 'Saving the best model nnet outputs (p_y_given_x) on valid and test'
+    path = '%s_p_y_given_x.npz'%model_name
+    numpy.savez_compressed(path, valid_p_y_given_x=valid_p_y_given_x,
+                                 test_p_y_given_x=test_p_y_given_x)
+
+
+def save_model_losses_and_costs(model_name, all_train_losses, all_valid_losses,
+    all_test_losses, all_train_costs_with_reg, all_train_costs_without_reg,
+    all_valid_costs, all_test_costs):
+
+    print 'Saving all losses and costs'
+    path = '%s_losses.npz'%model_name
+    numpy.savez_compressed(path, all_train_losses=all_train_losses,
+                                 all_valid_losses=all_valid_losses,
+                                 all_test_losses=all_test_losses)
+
+    path = '%s_costs.npz'%model_name
+    numpy.savez(path, train_costs_with_reg=all_train_costs_with_reg,
+                      train_costs_without_reg=all_train_costs_without_reg,
+                      valid_costs=all_valid_costs,
+                      test_costs=all_test_costs)
+
+
+def save_model_params(model_name, params_to_save):
+
+    # Save the best model params.
+    print 'Saving the best model params based on validation set.'
+    params = []
+    for i, param in enumerate(params_to_save):
+        params.append((param.name, param.get_value()))
+    path = '%s_params.tar.bz2'%model_name
+    dump_tar_bz2(params, path)

@@ -34,11 +34,8 @@ import theano
 import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 
-# TODO: use the load_data from util.
-from logistic_sgd import load_data
-
 import util
-from util import dump_tar_bz2, load_data, get_theano_constant
+from util import dump_tar_bz2, get_theano_constant, save_model_info, save_model_losses_and_costs, save_model_params
 
 rectified_linear_activation = lambda x: T.maximum(0.0, x)
 
@@ -348,20 +345,15 @@ class MLP(object):
 
         print 'building MLP...'
 
-        if dropout_p != -1 or maxout_k != -1:
-            if dropout_p != -1 and maxout_k != -1:
-                # Do not use drop_out_p and maxout_k options at the same time
-                # since drop out is already being done with maxout.
-                #print('dropout_p and maxout_k are both enabled. We will set '
-                #      'dropout_p to -1 since maxout already does drop-out.')
-                #dropout_p = -1
-                import pdb; pdb.set_trace()
-            self._init_with_dropout(rng, inputs, n_in, hidden_sizes, n_out,
-                                    activation, dropout_p, maxout_k)
-
-        else:
+        if dropout_p == -1 and maxout_k == -1:
+            # No dropout or maxout.
+            print 'No dropout or maxout!'
             self._init_ordinary(rng, inputs, n_in, hidden_sizes,
                                 n_out, activation)
+        else:
+            # Dropout-only or maxout.
+            self._init_with_dropout(rng, inputs, n_in, hidden_sizes, n_out,
+                                    activation, dropout_p, maxout_k)
 
     def _init_ordinary(self,rng, inputs, n_in, hidden_sizes, n_out, activation):
 
@@ -534,6 +526,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
 
     rng = numpy.random.RandomState(state.seed)
 
+
     ####### THEANO VARIABLES #######
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a [mini]batch
@@ -542,9 +535,6 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                         # [int] labels
     tepoch = T.iscalar()
     tepoch.tag.test_value = 1
-    lr = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
-    lr_0 = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
-    new_lr = T.cast(lr_0 / (1.0 + state.decrease_constant*tepoch), 'float32')
 
     # Regularization terms.
     state.L1 = numpy.array(state.L1,dtype='float32')
@@ -553,6 +543,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     L2_reg = get_theano_constant(state.L2, 'float32', ())
 
     # Compute momentum for the current epoch.
+    # TODO: check momentum update formula.
     if state.mom == 0:
         # Do not use mom
         print 'Momentum is not used.'
@@ -576,20 +567,25 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     # Construct the MLP class
     # TODO: Input and output size hardcoded for mnist.
     classifier = MLP(rng=rng, inputs=x, n_in=28 * 28,
-                        hidden_sizes=state.hidden_sizes, n_out=10,
-                        activation=state.activation, dropout_p=state.dropout_p,
-                        maxout_k=state.maxout_k)
+                     hidden_sizes=state.hidden_sizes, n_out=10,
+                     activation=state.activation, dropout_p=state.dropout_p,
+                     maxout_k=state.maxout_k)
+
+
+    # Get the number of model parameters.
+    n_params = len(classifier.params)
+    # Get right number of learning rates.
+    state.init_lr *= n_params/2
+
+    lr = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
+    lr_0 = theano.shared(numpy.asarray(state.init_lr,dtype='float32'))
+    new_lr = T.cast(lr_0 / (1.0 + state.decrease_constant*tepoch), 'float32')
 
 
     ####### Cost functions #######
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
-    """
-    cost = classifier.negative_log_likelihood(y) \
-        + state.L1 * classifier.L1 \
-        + state.L2 * classifier.L2_sqr
-    """
     ### Cost function + regularization terms. ###
     cost_reg = L1_reg * classifier.L1 + L2_reg * classifier.L2
     if state.dropout_p != -1 or state.maxout_k != -1:
@@ -627,14 +623,11 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     ### Updates rules for parameters ###
     # Specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs.
-    #updates = []
     updates = collections.OrderedDict()
     # given two list the zip A = [a1, a2, a3, a4] and B = [b1, b2, b3, b4] of
     # same length, zip generates a list C of same size, where each element
     # is a pair formed from the two lists :
     #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-    #for param, gparam in zip(classifier.params, gparams):
-    #    updates.append((param, param - lr * gparam))
 
     # Update the step direction using momentum
     # TODO: not need to include in the zip the init_lr.
@@ -772,7 +765,6 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                                 # on the validation set; in this case we
                                 # check every epoch
 
-    best_params = None
     best_validation_loss = numpy.inf
     best_iter = 0
     best_epoch = 0
@@ -782,17 +774,24 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     epoch = 0
     done_looping = False
 
+    # ALL losses (classification errors).
     all_train_losses = {}
     all_valid_losses = {}
     all_test_losses = {}
     all_train_costs_with_reg = {}
-    # Train costs with NO regularization.
+    # ALL costs with NO regularization.
     all_train_costs_without_reg = {}
     all_valid_costs = {}
     all_test_costs = {}
-    # Best validation and test nnet outputs (vector of probabilities).
+    # Best validation and test predictions based on validation nll.
+    best_valid_pred_and_targ = []
+    best_test_pred_and_targ = []
+    # Best validation and test nnet outputs (vector of probabilities)
+    # based on validation nll.
     best_valid_p_y_given_x = []
     best_test_p_y_given_x = []
+    # Best model params so far based on validation nll.
+    best_params = []
 
     vpredictions = []
     tpredictions = []
@@ -860,14 +859,18 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                             p_y_given_x = valid_output_on_batch_fn(i)
                             v_p_y_given_x.append(p_y_given_x)
 
+                        # Best nnet ouputs on validation set.
                         best_valid_p_y_given_x = v_p_y_given_x
 
                         if state.save_model_info:
                             # Best predictions on validation set.
-                            valid_pred_and_targ = numpy.array([valid_pred_and_targ_on_batch_fn(i) for i in xrange(n_valid_batches)])
+                            best_valid_pred_and_targ = numpy.array([valid_pred_and_targ_on_batch_fn(i)
+                                                                    for i in xrange(n_valid_batches)])
 
                         best_iter = iter
                         best_epoch = epoch
+                        # Best model params so far.
+                        best_params = classifier.params
 
                         # test it on the test set
                         # compute zero-one loss and the nll on the test set.
@@ -884,6 +887,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
 
                         test_score = numpy.mean(t_losses)
                         this_test_cost = numpy.mean(t_costs)
+                        # Best nnet ouputs on test set.
                         best_test_p_y_given_x = t_p_y_given_x
 
                         if state.save_losses_and_costs:
@@ -895,7 +899,8 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
 
                         if state.save_model_info:
                             # Best predictions on test set.
-                            test_pred_and_targ = numpy.array([test_pred_and_targ_on_batch_fn(i) for i in xrange(n_test_batches)])
+                            best_test_pred_and_targ = numpy.array([test_pred_and_targ_on_batch_fn(i)
+                                                                   for i in xrange(n_test_batches)])
 
                         print(('     epoch %i, minibatch %i/%i, test error of '
                             'best model %f %%') %
@@ -937,35 +942,23 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                         ' ran for %.2fm' % ((end_time - start_time) / 60.))
 
 
-    if state.save_model:
-        # Save the model.
-        print 'Saving model not implemented.'
+    if state.save_losses_and_costs:
+        save_model_losses_and_costs(state.model, all_train_losses, all_valid_losses,
+            all_test_losses, all_train_costs_with_reg, all_train_costs_without_reg,
+            all_valid_costs, all_test_costs)
 
     if state.save_model_info:
-        # Save the model valid/test predictions and targets.
-        print 'Saving the model predictions and targets'
-        path = '%s_pred_and_targ.npz'%state.model
-        valid_pred = valid_pred_and_targ[:,0,:]
-        valid_targ = valid_pred_and_targ[:,1,:]
-        test_pred = test_pred_and_targ[:,0,:]
-        test_targ = test_pred_and_targ[:,1,:]
-        numpy.savez_compressed(path, valid_pred=valid_pred,
-                                     valid_targ=valid_targ,
-                                     test_pred=test_pred,
-                                     test_targ=test_targ)
+        # Save the best model valid/test predictions, targets and nnet outputs.
+        save_model_info(state.model, best_valid_pred_and_targ,
+                        best_test_pred_and_targ, best_valid_p_y_given_x,
+                        best_test_p_y_given_x)
 
-    if state.save_losses_and_costs:
-        print 'Saving losses and costs'
-        path = '%s_losses.npz'%state.model
-        numpy.savez_compressed(path, all_train_losses=all_train_losses,
-                                     all_valid_losses=all_valid_losses,
-                                     all_test_losses=all_test_losses)
+    if state.save_model_params:
+        save_model_params(state.model, best_params)
 
-        path = '%s_costs.npz'%state.model
-        numpy.savez(path, train_costs_with_reg=all_train_costs_with_reg,
-                          train_costs_without_reg=all_train_costs_without_reg,
-                          valid_costs=all_valid_costs,
-                          test_costs=all_test_costs)
+    if state.save_state:
+        print 'We will save the experiment state'
+        dump_tar_bz2(state, 'state.tar.bz2')
 
     try:
         channel.save()

@@ -56,7 +56,6 @@ def batch_pred(model, data):
 
 
 def main(state, channel):
-    start = time.time()
     # Load the MNIST dataset.
     print 'Loading MNIST from '
     '''
@@ -119,6 +118,11 @@ def main(state, channel):
     else:
         raise NotImplementedError('Cross-validation type not supported.')
     '''
+
+    print 'Confing ', state
+
+    # Start timer for training.
+    start = time.time()
 
     if state.model == 'nnet':
         status = mlp.train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y)
@@ -223,7 +227,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     print 'valid_ce :', valid_ce
     print 'test_ce :', test_ce
 
-    if state.save_model:
+    if state.save_model_params:
         # Save the model.
         print 'Pickling the model'
         path = '%s.tar.bz2'%state.model
@@ -256,24 +260,24 @@ def experiment(state, channel):
 if __name__ == '__main__':
     from jobman import DD, expand
     # TODO: use jobman DD instead of dictionnary.
-    args = {'model'             : 'cnn',
+    args = {'model'                 : 'lsvm',
             # TODO: add 'model_type' option.
-            'dataset'           : 'mnist',
-            'save_model_info'   : True,
-            'save_model'        : False,
-            'save_state'        : False,
+            'dataset'               : 'mnist',
             'save_losses_and_costs' : True,
+            'save_model_params'     : False,
+            'save_model_info'       : True,
+            'save_state'            : True,
             # If using gpu, we will load the dataset
             # as a shared variable.
             'gpu'               : False,
             ### gdbt and random_forest ###
-            'n_estimators'      : 100,
-            'learning_rate'     : 0.1,
-            'max_depth'         : 3,
+            'n_estimators'      : 90,
+            'learning_rate'     : 1e-1,
+            'max_depth'         : 8,
             ### knn ###
-            'n_neighbors'       : 3,
+            'n_neighbors'       : 30,
             ### svm and lsvm ###
-            'C'                 : 1,
+            'C'                 : 100,
             'kernel'            : 'rbf',
             'degree'            : 3,
             'gamma'             : 0,
@@ -291,17 +295,18 @@ if __name__ == '__main__':
             'seed'              : 1234,
             'batch_size'        : 100,
             'lr_decay'          : True,
-            'init_lr'           : [1e-1, 1e-1]*2,
+            'init_lr'           : [1e-1, 1e-1],
             'decrease_constant' : 1e-3,
             'n_epochs'          : 1000,
             # Set dropout_p and maxout_k to -1 to not use them.
-            'dropout_p'         : 0.5,
-            'maxout_k'          : 2,
+            'dropout_p'             : -1,#0.5,
+            'maxout_k'              : -1,#2,
             # Set mom to 0 to not use momentum.
-            'mom'               : 0.5,
+            'mom'                   : 0.5,
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
-            'output_activation' : 'softmax',
+            # TODO: not used yet.
+            'output_activation'     : 'softmax',
             # Early-stopping.
             # Look at this many examples regardless.
             'patience'          : 10000,
@@ -310,11 +315,11 @@ if __name__ == '__main__':
             # A relative improvement of this much is considered significant.
             'improvement_threshold'  : 0.995,
             # regularization terms
-            'L1'                : 1e-5,
-            'L2'                : 1e-5,
+            'L1'                : 0,
+            'L2'                : 0,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'      : [500, 500],
+            'hidden_sizes'      : [500],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
             'activation' : 'tanh',
