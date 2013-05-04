@@ -19,9 +19,9 @@ model_config = {
             'n_estimators'      : ((40,500),int),
             'learning_rate'     : ((1e-4,1),float),
             'max_depth'         : ((3,20),int),
-            #'min_samples_split' : ((2,10),int),
-            #'min_samples_leaf'  : ((1,10),int),
-            #'subsample'         : ((1e-2,1.0),float),
+            'min_samples_split' : ((2,10),int),
+            'min_samples_leaf'  : ((1,10),int),
+            'subsample'         : ((1e-2,1.0),float),
             #'max_features'      : ((1e-4,0.5),float),
             #'verbose'           : 0, 1, or > 1
         },
@@ -33,8 +33,8 @@ model_config = {
             'max_depth'         : ((3,20),int),
             #'criterion'         : 'gini',
             #'max_features'      : ((1e-4,0.5),float),
-            #'min_samples_split' : ((2,10),int),
-            #'min_samples_leaf'  : ((1,10),int),
+            'min_samples_split' : ((2,10),int),
+            'min_samples_leaf'  : ((1,10),int),
             #'min_density'       : ((1e-4,1.0),float),
             #'bootstrap'         : True,
             #'n_jobs'            : 1,
@@ -97,7 +97,8 @@ def exp_sampling(((low,high),t)):
   return t(numpy.exp(r.uniform(low,high)))
 
 def cmd_line_embed(config):
-  cmd = 'jobman -r cmdline ml_code.init.experiment '
+  # TODO: do not hardcode the common options!
+  cmd = 'jobman -r cmdline ml_code.init.experiment save_model_params=False save_model_info=True save_state=True gpu=False '
 
   for key in config:
 
@@ -121,7 +122,7 @@ def get_cmd(model, mem):
 if __name__=='__main__':
     mem = 2000
     models = {'gdbt': (True, 150, mem),  'random_forest': (True, 150, mem),
-              'svm' : (False, 150, mem), 'lsvm'         : (False, 150, mem),
+              'svm' : (True, 150, mem),  'lsvm'         : (False, 150, mem),
               'knn' : (False, 150, mem)}
 
     cmds = []
