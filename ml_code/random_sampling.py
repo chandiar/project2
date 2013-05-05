@@ -2,15 +2,17 @@
 import sys
 import numpy
 import os
-import numpy.random as r
+import numpy.random as rng
 import socket
 import time
+
 
 HOST = socket.gethostname()
 
 S = int(time.time())
 print S
-r.seed(S)
+rng.seed(S)
+
 
 model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html
@@ -24,6 +26,11 @@ model_config = {
             'subsample'         : ((1e-2,1.0),float),
             #'max_features'      : ((1e-4,0.5),float),
             #'verbose'           : 0, 1, or > 1
+            # TODO: COMMON options.
+            'save_model_params' : False,
+            'save_model_info'   : True,
+            'save_state'        : True,
+            'gpu'               : False,
         },
 
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.RandomForestClassifier.html
@@ -39,6 +46,11 @@ model_config = {
             #'bootstrap'         : True,
             #'n_jobs'            : 1,
             #'verbose'           : 0, 1, or > 1
+            # TODO: COMMON options.
+            'save_model_params' : False,
+            'save_model_info'   : True,
+            'save_state'        : True,
+            'gpu'               : False,
         },
 
         # http://scikit-learn.org/dev/modules/generated/sklearn.neighbors.KNeighborsClassifier.html
@@ -47,6 +59,11 @@ model_config = {
             'n_neighbors'       : ((1,10), int),
             #'weights'           : 'uniform' or 'distance' or callable function
             #'p'                 : 2,
+            # TODO: COMMON options.
+            'save_model_params' : False,
+            'save_model_info'   : True,
+            'save_state'        : True,
+            'gpu'               : False,
         },
 
         # http://scikit-learn.org/dev/modules/generated/sklearn.neighbors.RadiusNeighborsClassifier.html
@@ -55,6 +72,11 @@ model_config = {
             #'radius'            : ((1,100), float),
             #'weights'           : 'uniform' or 'distance' or callable function
             #'p'                 : 2,
+            # TODO: COMMON options.
+            #'save_model_params' : False,
+            #'save_model_info'   : True,
+            #'save_state'        : True,
+            #'gpu'               : False,
         # },
 
         # http://scikit-learn.org/dev/modules/generated/sklearn.neighbors.NearestCentroid.html
@@ -62,6 +84,11 @@ model_config = {
             # 'model'             : 'nearest_centroid',
             # 'metric'            : 'euclidean',
             # 'shrink_threshold'  : None,
+            # TODO: COMMON options.
+            #'save_model_params' : False,
+            #'save_model_info'   : True,
+            #'save_state'        : True,
+            #'gpu'               : False,
         # },
 
         # http://scikit-learn.org/dev/modules/generated/sklearn.svm.SVC.html
@@ -75,6 +102,11 @@ model_config = {
             'tol'               : ((1e-5, 1), float),
             'cache_size'        : 1000,
             #'max_iter'          : ((100, 1000), int),
+            # TODO: COMMON options.
+            'save_model_params' : False,
+            'save_model_info'   : True,
+            'save_state'        : True,
+            'gpu'               : False,
         },
 
         # http://scikit-learn.org/dev/modules/generated/sklearn.svm.LinearSVC.html
@@ -88,28 +120,159 @@ model_config = {
             'fit_intercept'     : True,
             'intercept_scaling' : 1, # ((1e-5, 1), float),
             'tol'               : ((1e-5, 1), float),
+
+            # TODO: COMMON options.
+            'save_model_params' : False,
+            'save_model_info'   : True,
+            'save_state'        : True,
+            'gpu'               : False,
+        },
+
+        # MLP
+        'nnet' : {
+            'model'                 : 'nnet',
+            # TODO: COMMON options.
+            'save_model_params'     : True,
+            'save_model_info'       : True,
+            'save_state'            : True,
+            'gpu'                   : True,
+            'save_losses_and_costs' : True,
+            'seed'                  : 1234,
+            'batch_size'            : 100,
+            'lr_decay'              : True,
+            'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
+            'decrease_constant'     : 1e-3,
+            'n_epochs'              : 1000,
+            'dropout_p'             : 0.5,
+            'maxout_k'              : 2,
+            'mom'                   : 0.5,
+            'filter_square_limit'   : 15.0,
+            # Top layer output activation.
+            # TODO: not used yet.
+            'output_activation'     : 'softmax',
+            # Early-stopping.
+            # Look at this many examples regardless.
+            'patience'              : 10000,
+            # Wait this much longer when a new best is found.
+            'patience_increase'     : 2,
+            # A relative improvement of this much is considered significant.
+            'improvement_threshold' : 0.995,
+            # regularization terms
+            'L1'                    : 0,
+            'L2'                    : 0,
+            ## Hidden layers ##
+            # set this to [0] to fall back to LR
+            'hidden_sizes'          : [[10, 2500], [10, 2500]],
+            # Hidden output activation:
+            # tanh, rectifier, softplus, sigmoid, hard_tanh
+            'activation'            : 'tanh',
+        },
+
+        # Convolutional neural net.
+        'cnn' : {
+            'model'             : 'cnn',
+            # TODO: COMMON options.
+            'save_model_params'     : True,
+            'save_model_info'       : True,
+            'save_state'            : True,
+            'gpu'                   : True,
+            'save_losses_and_costs' : True,
+            'seed'                  : 1234,
+            'batch_size'            : 100,
+            'lr_decay'              : True,
+            'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
+            'decrease_constant'     : 1e-3,
+            'n_epochs'              : 1000,
+            'dropout_p'             : 0.5,
+            'maxout_k'              : 2,
+            'mom'                   : 0.5,
+            'filter_square_limit'   : 15.0,
+            # Top layer output activation.
+            # TODO: not used yet.
+            'output_activation'     : 'softmax',
+            # Early-stopping.
+            # Look at this many examples regardless.
+            'patience'              : 10000,
+            # Wait this much longer when a new best is found.
+            'patience_increase'     : 2,
+            # A relative improvement of this much is considered significant.
+            'improvement_threshold' : 0.995,
+            # regularization terms
+            'L1'                    : 0,
+            'L2'                    : 0,
+            ## Hidden layers ##
+            # set this to [0] to fall back to LR
+            'hidden_sizes'          : [[10, 2500], [10, 2500]],
+            # Hidden output activation:
+            # tanh, rectifier, softplus, sigmoid, hard_tanh
+            'activation'            : 'tanh',
+            # TODO: cnn options only.
+            # Number of filters.
+            'nkerns'            : [20, 50],
         },
 }
 
 def exp_sampling(((low,high),t)):
   low = numpy.log(low)
   high = numpy.log(high)
-  return t(numpy.exp(r.uniform(low,high)))
+  return t(numpy.exp(rng.uniform(low,high)))
+
 
 def cmd_line_embed(config):
   # TODO: do not hardcode the common options!
-  cmd = 'jobman -r cmdline ml_code.init.experiment save_model_params=False save_model_info=True save_state=True gpu=False '
+  cmd = 'THEANO_FLAGS=floatX=float32 jobman -r cmdline ml_code.init.experiment '
 
   for key in config:
 
-    if type(config[key])==type(()):
+    if 'hidden_sizes' == key:
+        cmd_params_structure = config[key]
+        hidden_sizes = []
+        for layer in cmd_params_structure:
+            v = rng.randint(layer[0], layer[1])
+            hidden_sizes.append(v)
+        temp = `hidden_sizes`
+        # TODO: removing whitespaces should be done for all cases.
+        temp = temp.replace(' ', '')
+        cmd +=  (key+'='+temp+' ')
+    elif 'init_lr' == key:
+        # TODO: for the moment, same learning rates for every layers!!!
+        cmd_params_lrs = config[key]
+        # Set up learning rates for different layers.
+        init_lr = []
+        candidate = None
+
+        for layer in cmd_params_lrs:
+            # TODO: not really a layer!
+            if layer == [-1, -1]:
+                # different layers will use the same learning rate
+                assert candidate is not None
+                init_lr.append(candidate)
+            else:
+                l = numpy.log(layer[0])
+                r = numpy.log(layer[1])
+                candidate = numpy.exp(rng.uniform(l,r))
+                init_lr.append(candidate)
+
+        temp = `init_lr`
+        temp = temp.replace(' ', '')
+        cmd += (key+'='+temp+' ')
+
+        # TODO: checking not tested.
+        #assert len(init_lr) == 2 * len(hidden_sizes) + 2
+    elif 'nkerns' == key:
+      # TODO: should not harcode the name of the option in this case.
+      temp = `config[key]`
+      temp = temp.replace(' ', '')
+      cmd += (key+'='+temp+' ')
+    elif type(config[key])==type(()):
       val = exp_sampling(config[key])
       cmd += (key+'='+`val`+' ')
     elif type(config[key])==type([]):
-      cmd += (key+'='+`config[key][r.randint(len(config[key]))]`+' ')
+      cmd += (key+'='+`config[key][rng.randint(len(config[key]))]`+' ')
     else:
       cmd += (key+'='+`config[key]`+' ')
   return cmd
+
 
 def get_cmd(model, mem):
     cmd = 'jobdispatch --file=commands_%s --mem=%s'%(model, mem)
@@ -119,11 +282,13 @@ def get_cmd(model, mem):
         cmd += ' --bqtools '
     return cmd
 
+
 if __name__=='__main__':
     mem = 2000
-    models = {'gdbt': (True, 150, mem),  'random_forest': (True, 150, mem),
-              'svm' : (True, 150, mem),  'lsvm'         : (False, 150, mem),
-              'knn' : (False, 150, mem)}
+    models = {'gdbt': (False, 150, mem),  'random_forest': (False, 150, mem),
+              'svm' : (False, 150, mem),  'lsvm'         : (False, 150, mem),
+              'knn' : (False, 150, mem),  'nnet'         : (True, 150, 1500),
+              'cnn' : (True, 150, 1500)}
 
     cmds = []
 
@@ -131,7 +296,8 @@ if __name__=='__main__':
         if not launch:
             continue
         cmd = get_cmd(model, mem)
-        os.mkdir(model)
+        if not os.path.exists(model):
+            os.mkdir(model)
         f = open('%s/commands_%s'%(model, model),'w')
         for i in range(n_exps):
             f.write(cmd_line_embed(model_config[model])+'\n')
