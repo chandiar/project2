@@ -33,6 +33,7 @@ import numpy
 import theano
 import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams
+from theano.ifelse import ifelse
 
 import util
 from util import dump_tar_bz2, get_theano_constant, save_model_info, save_model_losses_and_costs, save_model_params
@@ -185,7 +186,7 @@ class HiddenLayer(object):
         # from sqrt(-6./(n_in+n_hidden)) and sqrt(6./(n_in+n_hidden))
         # for tanh activation function
         # the output of uniform if converted using asarray to dtype
-        # theano.config.floatX so that the code is runable on GPU
+        # float32 so that the code is runable on GPU
         # Note : optimal initialization of weights is dependent on the
         #        activation function used (among other things).
         #        For example, results presented in [Xavier10] suggest that you
@@ -197,7 +198,7 @@ class HiddenLayer(object):
             W_values = numpy.asarray(rng.uniform(
                     low=-numpy.sqrt(6. / (n_in + n_out)),
                     high=numpy.sqrt(6. / (n_in + n_out)),
-                    size=(n_in, n_out)), dtype=theano.config.floatX)
+                    size=(n_in, n_out)), dtype='float32')
             #if self.activation == theano.tensor.nnet.sigmoid:
             if self.activation == 'sigmoid':
                 W_values *= 4
@@ -205,7 +206,7 @@ class HiddenLayer(object):
             W = theano.shared(value=W_values, name='W', borrow=True)
 
         if b is None:
-            b_values = numpy.zeros((n_out,), dtype=theano.config.floatX)
+            b_values = numpy.zeros((n_out,), dtype='float32')
             b = theano.shared(value=b_values, name='b', borrow=True)
 
         self.W = W
@@ -273,7 +274,7 @@ class MaxPoolingHiddenLayer(HiddenLayer):
             #W_values = numpy.asarray(rng.uniform(
             #        low=-numpy.sqrt(6. / (n_in + n_out*maxout_k)),
             #        high=numpy.sqrt(6. / (n_in + n_out*maxout_k)),
-            #        size=(n_in, n_out*maxout_k)), dtype=theano.config.floatX)
+            #        size=(n_in, n_out*maxout_k)), dtype=float32)
             W_values = numpy.asarray(rng.normal(
                     loc=0, scale=0.005,
                     size=(n_in, n_out*maxout_k)), dtype='float32')
@@ -614,7 +615,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     for param in classifier.params:
         gparam_mom = theano.shared(
             numpy.zeros(param.get_value(borrow=True).shape,
-            dtype=theano.config.floatX))
+            dtype='float32'))
         gparams_mom.append(gparam_mom)
 
     # end of gradient of cost
