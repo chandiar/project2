@@ -106,6 +106,7 @@ model_config = {
             'coef0'             : ((1e-5, 100), float),
             'tol'               : ((1e-5, 1), float),
             'cache_size'        : 1000,
+            'probability'       : False,
             #'max_iter'          : ((100, 1000), int),
             # TODO: COMMON options.
             'save_model_params' : False,
