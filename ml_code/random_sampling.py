@@ -8,10 +8,15 @@ import time
 
 
 HOST = socket.gethostname()
+print HOST
 
 S = int(time.time())
 print S
 rng.seed(S)
+
+# TODO: do not hardcode this option, should be given in the command line.
+with_gpu = True
+print 'with_gpu=',with_gpu 
 
 
 model_config = {
@@ -143,8 +148,8 @@ model_config = {
             'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
             'decrease_constant'     : 1e-3,
             'n_epochs'              : 1000,
-            'dropout_p'             : ((0.3,0.8), float),
-            'maxout_k'              : ((2,5), int),
+            'dropout_p'             : ((0.3, 0.8), float),
+            'maxout_k'              : ((2, 5), int),
             'mom'                   : 0.5,
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
@@ -162,7 +167,7 @@ model_config = {
             'L2'                    : 0,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'          : [[10, 2500]],
+            'hidden_sizes'          : [[500, 1500], [500, 1500]],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
             'activation'            : 'tanh',
@@ -183,8 +188,8 @@ model_config = {
             'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
             'decrease_constant'     : 1e-3,
             'n_epochs'              : 1000,
-            'dropout_p'             : ((0.3,0.8), float),
-            'maxout_k'              : ((2,5), int),
+            'dropout_p'             : ((0.3, 0.8), float),
+            'maxout_k'              : ((2, 5), int),
             'mom'                   : 0.5,
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
@@ -202,7 +207,7 @@ model_config = {
             'L2'                    : 0,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'          : [[10, 2500]],
+            'hidden_sizes'          : [[500, 1500], [500, 1500]],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
             'activation'            : 'tanh',
@@ -220,7 +225,10 @@ def exp_sampling(((low,high),t)):
 
 def cmd_line_embed(config):
   # TODO: do not hardcode the common options!
-  cmd = 'THEANO_FLAGS=floatX=float32 jobman -r cmdline ml_code.init.experiment '
+  if 'briaree' in HOST:
+    cmd = 'jobman -r cmdline ml_code.init.experiment '
+  else:
+    cmd = 'THEANO_FLAGS=floatX=float32 jobman -r cmdline ml_code.init.experiment '
 
   for key in config:
 
@@ -280,6 +288,11 @@ def get_cmd(model, mem):
         cmd += ' --condor '
     elif 'ip05' in HOST:
         cmd += ' --bqtools '
+    elif 'briaree' in HOST:
+        # Briaree cluster.
+        if with_gpu:
+            cmd += ' --gpu '
+        cmd += ' --env=THEANO_FLAGS=floatX=float32 '
     return cmd
 
 
@@ -287,8 +300,8 @@ if __name__=='__main__':
     mem = 2000
     models = {'gdbt': (False, 150, mem),  'random_forest': (False, 150, mem),
               'svm' : (False, 150, mem),  'lsvm'         : (False, 150, mem),
-              'knn' : (False, 150, mem),  'nnet'         : (True, 200, 1500),
-              'cnn' : (True, 200, 1500)}
+              'knn' : (False, 150, mem),  'nnet'         : (True, 5, 1500),
+              'cnn' : (False, 5, 1500)}
 
     cmds = []
 
