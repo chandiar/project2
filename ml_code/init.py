@@ -154,13 +154,18 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
         classifier = GradientBoostingClassifier(
                           n_estimators=state.n_estimators,
                           learning_rate=state.learning_rate,
-                          max_depth=state.max_depth)
+                          max_depth=state.max_depth,
+                          min_samples_split=state.min_samples_split,
+                          min_samples_leaf=state.min_samples_leaf,
+                          subsample=state.subsample)
     elif state.model == 'random_forest':
         print 'Fitting Random Forest'
         classifier = RandomForestClassifier(
                         n_estimators=state.n_estimators,
                         max_depth=state.max_depth,
-                        random_state=0)
+                        random_state=0,
+                        min_samples_split=state.min_samples_split,
+                        min_samples_leaf=state.min_samples_leaf)
     elif state.model == 'knn':
         print 'Fitting KNN'
         classifier = KNeighborsClassifier(n_neighbors=state.n_neighbors)
@@ -173,7 +178,8 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                     gamma=state.gamma,
                     coef0=state.coef0,
                     tol=state.tol,
-                    cache_size=state.cache_size)
+                    cache_size=state.cache_size,
+                    probability=state.probability)
     elif state.model == 'lsvm':
         print 'Fitting Linear SVM'
         classifier = LinearSVC(
@@ -260,12 +266,12 @@ def experiment(state, channel):
 if __name__ == '__main__':
     from jobman import DD, expand
     # TODO: use jobman DD instead of dictionnary.
-    args = {'model'                 : 'lsvm',
+    args = {'model'                 : 'svm',
             # TODO: add 'model_type' option.
             'dataset'               : 'mnist',
             # TODO: option only for nnet et cnn.
             'save_losses_and_costs' : True,
-            'save_model_params'     : False,
+            'save_model_params'     : True,
             'save_model_info'       : True,
             'save_state'            : True,
             # If using gpu, we will load the dataset
@@ -279,12 +285,13 @@ if __name__ == '__main__':
             'n_neighbors'       : 30,
             ### svm and lsvm ###
             'C'                 : 1,
-            'kernel'            : 'rbf',
-            'degree'            : 3,
-            'gamma'             : 0,
-            'coef0'             : 0,
-            'tol'               : 1e-3,
-            'cache_size'        : 500,
+            'kernel'            : 'poly',#'rbf',
+            'degree'            : 5,#3,
+            'gamma'             : 1.2071934552917665,#0,
+            'coef0'             : 0.16338062128490524,#0,
+            'tol'               : 0.9535263731404809,#1e-3,
+            'cache_size'        : 1000,#500,
+            'probability'       : True,#False,
             ### lsvm ###
             'loss'              : 'l2',
             'penalty'           : 'l2',
