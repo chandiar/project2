@@ -132,7 +132,7 @@ model_config = {
         'nnet' : {
             'model'                 : 'nnet',
             # TODO: COMMON options.
-            'save_model_params'     : True,
+            'save_model_params'     : False,
             'save_model_info'       : True,
             'save_state'            : True,
             'gpu'                   : True,
@@ -143,8 +143,8 @@ model_config = {
             'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
             'decrease_constant'     : 1e-3,
             'n_epochs'              : 1000,
-            'dropout_p'             : 0.5,
-            'maxout_k'              : 2,
+            'dropout_p'             : ((0.3,0.8), float),
+            'maxout_k'              : ((2,5), int),
             'mom'                   : 0.5,
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
@@ -162,7 +162,7 @@ model_config = {
             'L2'                    : 0,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'          : [[10, 2500], [10, 2500]],
+            'hidden_sizes'          : [[10, 2500]],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
             'activation'            : 'tanh',
@@ -172,7 +172,7 @@ model_config = {
         'cnn' : {
             'model'             : 'cnn',
             # TODO: COMMON options.
-            'save_model_params'     : True,
+            'save_model_params'     : False,
             'save_model_info'       : True,
             'save_state'            : True,
             'gpu'                   : True,
@@ -183,8 +183,8 @@ model_config = {
             'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
             'decrease_constant'     : 1e-3,
             'n_epochs'              : 1000,
-            'dropout_p'             : 0.5,
-            'maxout_k'              : 2,
+            'dropout_p'             : ((0.3,0.8), float),
+            'maxout_k'              : ((2,5), int),
             'mom'                   : 0.5,
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
@@ -202,7 +202,7 @@ model_config = {
             'L2'                    : 0,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'          : [[10, 2500], [10, 2500]],
+            'hidden_sizes'          : [[10, 2500]],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
             'activation'            : 'tanh',
@@ -287,8 +287,8 @@ if __name__=='__main__':
     mem = 2000
     models = {'gdbt': (False, 150, mem),  'random_forest': (False, 150, mem),
               'svm' : (False, 150, mem),  'lsvm'         : (False, 150, mem),
-              'knn' : (False, 150, mem),  'nnet'         : (True, 150, 1500),
-              'cnn' : (True, 150, 1500)}
+              'knn' : (False, 150, mem),  'nnet'         : (True, 200, 1500),
+              'cnn' : (True, 200, 1500)}
 
     cmds = []
 
