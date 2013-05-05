@@ -263,6 +263,7 @@ if __name__ == '__main__':
     args = {'model'                 : 'lsvm',
             # TODO: add 'model_type' option.
             'dataset'               : 'mnist',
+            # TODO: option only for nnet et cnn.
             'save_losses_and_costs' : True,
             'save_model_params'     : False,
             'save_model_info'       : True,
