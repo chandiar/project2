@@ -199,7 +199,8 @@ model_config = {
             'dropout_p'             : ((0.3, 0.8), float),
             'maxout_k'              : ((2, 5), int),
             'mom'                   : 0.5,
-            'filter_square_limit'   : 15.0         # TODO: not used yet.
+            'filter_square_limit'   : 15.0,         
+            # TODO: not used yet.
             'output_activation'     : 'softmax',
             # Early-stopping.
             # Look at this many examples regardless.
@@ -339,10 +340,3 @@ if __name__=='__main__':
     cmd = 'jobdispatch --gpu --env=THEANO_FLAGS=device=gpu,floatX=float32 --mem=1500 --bqtools --file=commands'
     os.system(cmd)
     '''
-
-
-s --file=commands'
-    os.system(cmd)
-    '''
-
-
