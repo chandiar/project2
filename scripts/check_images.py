@@ -14,26 +14,32 @@ from project2.ml_code import util
 
 data_dir = util.get_dataset_base_path()
 
-def generate_images(data):
+
+def check_images(data):
     dataset = data[0][0]
     label = data[0][1]
     dataset_name = data[1]
-    print 'Generating images from %s' %dataset_name
+    print 'Checking images from %s' %dataset_name
     print '%s shape is %s' %(dataset_name, dataset.shape)
     print 'Label shape is %s' %label.shape
-    for idx, sample in enumerate(dataset):
-        sys.stdout.write('\r%2d%%' % int(idx / float(len(dataset)) * 100 + 0.5))
+    dir_path = os.path.join(data_dir, 'mnist_images', '%s'%dataset_name)
+    filenames = os.listdir(dir_path)
+    n_valid_files = 0
+    n_invalid_files = 0
+    for i, filename in enumerate(filenames):
+        if not filename.endswith('.png'):
+            n_invalid_files += 1
+            continue
+        sys.stdout.write('\r%2d%%' % int(i / float(len(filenames)) * 100 + 0.5))
         sys.stdout.flush()
-        sample = sample.reshape((28,28))
-        target = int(label[idx])
-        out_dir = os.path.join(data_dir, 'mnist_images', '%s'%dataset_name)
-        if not os.path.exists(out_dir):
-            print 'creating directory %s' %out_dir
-            os.makedirs(out_dir)
-        filename = 'image_idx_%s_number_%s.png'%(idx, target)
-        out_path = os.path.join(out_dir, filename)
-        if not os.path.exists(out_path):
-            scipy.misc.imsave(out_path, sample)
+        idx = int(filename.split('idx_')[1].split('_')[0])
+        target = int(filename.split('number_')[1].split('.')[0])
+        if int(label[idx]) != target:
+            import pdb; pdb.set_trace()
+        n_valid_files += 1
+    print 'Number of valid files: ', n_valid_files
+    print 'Number of invalid files: ', n_invalid_files
+
 
 def main():
     # Load the MNIST dataset.
@@ -42,11 +48,8 @@ def main():
     f = gzip.open(data_path, 'rb')
     train_set, valid_set, test_set = cPickle.load(f)
     f.close()
-    import pdb; pdb.set_trace()
-    generate_images((valid_set, 'valid_set'))
-    import pdb; pdb.set_trace()
     for data in [(train_set, 'train_set'), (valid_set, 'valid_set'), (test_set, 'test_set')]:
-        generate_images(data)
+        check_images(data)
         import pdb; pdb.set_trace()
 
 if __name__=='__main__':
