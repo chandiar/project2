@@ -37,8 +37,6 @@ def generate_images(data):
 
 def main():
     # Load the MNIST dataset.
-    #mnist = fetch_mldata('MNIST original',
-    #    data_home=data_dir)
     data_path = os.path.join(data_dir, 'mnist.pkl.gz')
     print 'Loading the MNIST dataset from %s' %data_path
     f = gzip.open(data_path, 'rb')
