@@ -105,15 +105,18 @@ def main(state, channel):
         train_set, valid_set, test_set = cPickle.load(f)
         f.close()
 
-        #train_x =  numpy.load(os.path.join(data_dir, 'train_set_hog_features.npy'))
-        #valid_x =  numpy.load(os.path.join(data_dir, 'valid_set_hog_features.npy'))
+        train_x =  numpy.load(os.path.join(data_dir, 'train_set_hog_features.npy'))
+        valid_x =  numpy.load(os.path.join(data_dir, 'valid_set_hog_features.npy'))
         test_x =  numpy.load(os.path.join(data_dir, 'test_set_hog_features.npy'))
 
         train_y = train_set[1]
         valid_y = valid_set[1]
         test_y = test_set[1]
-        
-        import pdb; pdb.set_trace()
+ 
+        #train_x = train_x[0:1000,:]
+        #train_y = train_y[0:1000]
+       
+        #import pdb; pdb.set_trace()
 
     # Cross-validation.
     '''
@@ -282,10 +285,10 @@ def experiment(state, channel):
 if __name__ == '__main__':
     from jobman import DD, expand
     # TODO: use jobman DD instead of dictionnary.
-    args = {'model'                 : 'svm',
+    args = {'model'                 : 'lsvm',
             # TODO: add 'model_type' option.
             'dataset'               : 'mnist',
-            'features'              : None,
+            'features'              : 'hog',
             # TODO: option only for nnet et cnn.
             'save_losses_and_costs' : True,
             'save_model_params'     : True,
