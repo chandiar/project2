@@ -23,6 +23,7 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html
         'gdbt' : {
             'model'             : 'gdbt',
+            'features'          : 'hog',
             'n_estimators'      : ((40,500),int),
             'learning_rate'     : ((1e-4,1),float),
             'max_depth'         : ((3,20),int),
@@ -41,6 +42,7 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.ensemble.RandomForestClassifier.html
         'random_forest' : {
             'model'             : 'random_forest',
+            'features'          : 'hog',
             'n_estimators'      : ((40,500),int),
             'max_depth'         : ((3,20),int),
             #'criterion'         : 'gini',
@@ -61,6 +63,7 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.neighbors.KNeighborsClassifier.html
         'knn' : {
             'model'             : 'knn',
+            'features'          : 'hog',
             'n_neighbors'       : ((1,10), int),
             #'weights'           : 'uniform' or 'distance' or callable function
             #'p'                 : 2,
@@ -99,6 +102,7 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.svm.SVC.html
         'svm' : {
             'model'             : 'svm',
+            'features'          : 'hog',
             'C'                 : ((1,10000),float),
             'kernel'            : ['linear', 'poly', 'rbf', 'sigmoid'],
             'degree'            : ((3, 10), int),
@@ -118,6 +122,7 @@ model_config = {
         # http://scikit-learn.org/dev/modules/generated/sklearn.svm.LinearSVC.html
         'lsvm' : {
             'model'             : 'lsvm',
+            'features'          : 'hog',
             'C'                 : ((1,10000),float),
             'loss'              : 'l2', # 'l1'
             'penalty'           : 'l2', # 'l1'
@@ -137,6 +142,7 @@ model_config = {
         # MLP
         'nnet' : {
             'model'                 : 'nnet',
+            'features'              : None,
             # TODO: COMMON options.
             'save_model_params'     : False,
             'save_model_info'       : True,
@@ -176,7 +182,8 @@ model_config = {
 
         # Convolutional neural net.
         'cnn' : {
-            'model'             : 'cnn',
+            'model'                 : 'cnn',
+            'features'              : None,
             # TODO: COMMON options.
             'save_model_params'     : False,
             'save_model_info'       : True,
@@ -192,9 +199,7 @@ model_config = {
             'dropout_p'             : ((0.3, 0.8), float),
             'maxout_k'              : ((2, 5), int),
             'mom'                   : 0.5,
-            'filter_square_limit'   : 15.0,
-            # Top layer output activation.
-            # TODO: not used yet.
+            'filter_square_limit'   : 15.0         # TODO: not used yet.
             'output_activation'     : 'softmax',
             # Early-stopping.
             # Look at this many examples regardless.
@@ -332,6 +337,11 @@ if __name__=='__main__':
     f.close()
 
     cmd = 'jobdispatch --gpu --env=THEANO_FLAGS=device=gpu,floatX=float32 --mem=1500 --bqtools --file=commands'
+    os.system(cmd)
+    '''
+
+
+s --file=commands'
     os.system(cmd)
     '''
 
