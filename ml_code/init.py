@@ -5,7 +5,7 @@
 # TO check if the gpu is being used:
 # nvidia-smi
 
-import os, sys, time
+import cPickle, gzip, os, sys, time
 import numpy
 import sklearn
 from sklearn.datasets import fetch_mldata
@@ -81,23 +81,39 @@ def main(state, channel):
     test_x, test_y = shuffle(test_x, test_y)
     '''
 
-    data_path = os.path.join(data_dir, 'mnist.pkl.gz')
-    print 'Loading the MNIST dataset from %s' %data_path
-    if state.model in ['nnet', 'cnn']:
-        state.gpu = True
-        print 'GPU should be enabled'
-    # TODO: check how to retrieve the gpu status.
-    if state.gpu:
-        #print 'GPU enabled'
-        print 'Loading dataset in shared variables'
-    else:
-        #print 'GPU disabled'
-        print 'Loading dataset in numpy array'
-    datasets = load_data(data_path, splits=[train_size, valid_size, test_size], shared=state.gpu)
+    if state.features is None:
+        data_path = os.path.join(data_dir, 'mnist.pkl.gz')
+        print 'Loading the MNIST dataset from %s' %data_path
+        if state.model in ['nnet', 'cnn']:
+            state.gpu = True
+            print 'GPU should be enabled'
+        # TODO: check how to retrieve the gpu status.
+        if state.gpu:
+            #print 'GPU enabled'
+            print 'Loading dataset in shared variables'
+        else:
+            #print 'GPU disabled'
+            print 'Loading dataset in numpy array'
+        datasets = load_data(data_path, splits=[train_size, valid_size, test_size], shared=state.gpu)
 
-    train_x, train_y = datasets[0]
-    valid_x, valid_y = datasets[1]
-    test_x, test_y = datasets[2]
+        train_x, train_y = datasets[0]
+        valid_x, valid_y = datasets[1]
+        test_x, test_y = datasets[2]
+    else:
+        data_path = os.path.join(data_dir, 'mnist.pkl.gz')
+        f = gzip.open(data_path, 'rb')
+        train_set, valid_set, test_set = cPickle.load(f)
+        f.close()
+
+        #train_x =  numpy.load(os.path.join(data_dir, 'train_set_hog_features.npy'))
+        #valid_x =  numpy.load(os.path.join(data_dir, 'valid_set_hog_features.npy'))
+        test_x =  numpy.load(os.path.join(data_dir, 'test_set_hog_features.npy'))
+
+        train_y = train_set[1]
+        valid_y = valid_set[1]
+        test_y = test_set[1]
+        
+        import pdb; pdb.set_trace()
 
     # Cross-validation.
     '''
@@ -206,7 +222,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
             print 'Computing valid predictions'
             vpredictions = classifier.predict(valid_x)
         else:
-            vpredictions = []
+            vpredictions = []        
         print 'Computing test predictions'
         tpredictions = classifier.predict(test_x)
     else:
@@ -269,6 +285,7 @@ if __name__ == '__main__':
     args = {'model'                 : 'svm',
             # TODO: add 'model_type' option.
             'dataset'               : 'mnist',
+            'features'              : None,
             # TODO: option only for nnet et cnn.
             'save_losses_and_costs' : True,
             'save_model_params'     : True,
@@ -284,12 +301,12 @@ if __name__ == '__main__':
             ### knn ###
             'n_neighbors'       : 30,
             ### svm and lsvm ###
-            'C'                 : 1,
+            'C'                 : 96.18027245560332,
             'kernel'            : 'poly',#'rbf',
-            'degree'            : 5,#3,
-            'gamma'             : 1.2071934552917665,#0,
-            'coef0'             : 0.16338062128490524,#0,
-            'tol'               : 0.9535263731404809,#1e-3,
+            'degree'            : 3,#3,
+            'gamma'             : 587.0903500477523,#0,
+            'coef0'             : 0.021022297779565987,#0,
+            'tol'               : 0.7954910670273062,#1e-3,
             'cache_size'        : 1000,#500,
             'probability'       : True,#False,
             ### lsvm ###
@@ -349,3 +366,4 @@ if __name__ == '__main__':
     # wrap args into a DD object
     state = expand(args)
     main(state, {})
+
