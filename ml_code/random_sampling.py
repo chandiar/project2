@@ -27,9 +27,9 @@ model_config = {
             'n_estimators'      : ((40,500),int),
             'learning_rate'     : ((1e-4,1),float),
             'max_depth'         : ((3,20),int),
-            'min_samples_split' : ((2,10),int),
-            'min_samples_leaf'  : ((1,10),int),
-            'subsample'         : ((1e-2,1.0),float),
+            'min_samples_split' : 2,#((2,10),int),
+            'min_samples_leaf'  : 1,#((1,10),int),
+            'subsample'         : 1,#((1e-2,1.0),float),
             #'max_features'      : ((1e-4,0.5),float),
             #'verbose'           : 0, 1, or > 1
             # TODO: COMMON options.
@@ -47,8 +47,8 @@ model_config = {
             'max_depth'         : ((3,20),int),
             #'criterion'         : 'gini',
             #'max_features'      : ((1e-4,0.5),float),
-            'min_samples_split' : ((2,10),int),
-            'min_samples_leaf'  : ((1,10),int),
+            'min_samples_split' : 2,#((2,10),int),
+            'min_samples_leaf'  : 1,#((1,10),int),
             #'min_density'       : ((1e-4,1.0),float),
             #'bootstrap'         : True,
             #'n_jobs'            : 1,
@@ -104,13 +104,13 @@ model_config = {
             'model'             : 'svm',
             'features'          : 'hog',
             'C'                 : ((1,10000),float),
-            'kernel'            : ['linear', 'poly', 'rbf', 'sigmoid'],
+            'kernel'            : ['poly', 'rbf'], #['linear', 'poly', 'rbf', 'sigmoid'],
             'degree'            : ((3, 10), int),
             'gamma'             : ((1e-5, 1e3), float),
             'coef0'             : ((1e-5, 100), float),
             'tol'               : ((1e-5, 1), float),
             'cache_size'        : 1000,
-            'probability'       : False,
+            'probability'       : True,
             #'max_iter'          : ((100, 1000), int),
             # TODO: COMMON options.
             'save_model_params' : False,
@@ -199,7 +199,8 @@ model_config = {
             'dropout_p'             : ((0.3, 0.8), float),
             'maxout_k'              : ((2, 5), int),
             'mom'                   : 0.5,
-            'filter_square_limit'   : 15.0         # TODO: not used yet.
+            'filter_square_limit'   : 15.0,         
+            # TODO: not used yet.
             'output_activation'     : 'softmax',
             # Early-stopping.
             # Look at this many examples regardless.
@@ -304,8 +305,8 @@ def get_cmd(model, mem):
 
 if __name__=='__main__':
     mem = 2000
-    models = {'gdbt': (False, 150, 1000),  'random_forest': (True, 150, 1000),
-              'svm' : (False, 150, mem),  'lsvm'         : (False, 150, mem),
+    models = {'gdbt': (True, 150, 1000),  'random_forest': (False, 150, 1000),
+              'svm' : (False, 150, 1500),  'lsvm'         : (False, 150, mem),
               'knn' : (False, 150, mem),  'nnet'         : (False, 5, 1500),
               'cnn' : (False, 5, 1500)}
 
@@ -339,10 +340,3 @@ if __name__=='__main__':
     cmd = 'jobdispatch --gpu --env=THEANO_FLAGS=device=gpu,floatX=float32 --mem=1500 --bqtools --file=commands'
     os.system(cmd)
     '''
-
-
-s --file=commands'
-    os.system(cmd)
-    '''
-
-
