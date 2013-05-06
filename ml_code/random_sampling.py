@@ -15,7 +15,7 @@ print S
 rng.seed(S)
 
 # TODO: do not hardcode this option, should be given in the command line.
-with_gpu = True
+with_gpu = False
 print 'with_gpu=',with_gpu 
 
 
@@ -299,9 +299,9 @@ def get_cmd(model, mem):
 
 if __name__=='__main__':
     mem = 2000
-    models = {'gdbt': (False, 150, mem),  'random_forest': (False, 150, mem),
+    models = {'gdbt': (False, 150, 1000),  'random_forest': (True, 150, 1000),
               'svm' : (False, 150, mem),  'lsvm'         : (False, 150, mem),
-              'knn' : (False, 150, mem),  'nnet'         : (True, 5, 1500),
+              'knn' : (False, 150, mem),  'nnet'         : (False, 5, 1500),
               'cnn' : (False, 5, 1500)}
 
     cmds = []
