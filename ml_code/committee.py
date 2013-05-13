@@ -8,9 +8,9 @@ from util import load_data
 # whic_models[0] = SVM,
 # whic_models[1] = CNN,
 # whic_models[2] = MLP,
-which_models = [0,0,1]
+which_models = [0,1,0]
 these_k = [1, 5, 10]
-all_models = [0, 0, 0]
+all_models = [0, 1, 0]
 clr_by_model_type = {'svm':{},'cnn':{},'mlp':{}}
 all_models_clr_by_type = {'svm': None, 'cnn': None, 'mlp': None}
 
@@ -112,10 +112,10 @@ if which_models[1]:
     cnn_models = []
 
     for model_path in os.listdir(cnn_models_path):
-        nnet_output = numpy.load(os.path.join(cnn_models_path, model_path, 'nnet_p_y_given_x.npz'))
+        nnet_output = numpy.load(os.path.join(cnn_models_path, model_path, 'cnn_p_y_given_x.npz'))
         valid_nnet_output = nnet_output['valid_p_y_given_x'].reshape((10000, 10))
         test_nnet_output = nnet_output['test_p_y_given_x'].reshape((10000, 10))
-        pred_targ = numpy.load(os.path.join(cnn_models_path, model_path, 'nnet_pred_and_targ.npz'))
+        pred_targ = numpy.load(os.path.join(cnn_models_path, model_path, 'cnn_pred_and_targ.npz'))
         valid_targ = pred_targ['valid_targ'].flatten()
         valid_pred = pred_targ['valid_pred'].flatten()
         test_targ = pred_targ['test_targ'].flatten()
