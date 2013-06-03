@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-import sys
+import multiprocessing
 import numpy
-import os
 import numpy.random as rng
+import os
 import socket
+import sys
 import time
 
 
@@ -16,7 +17,7 @@ rng.seed(S)
 
 # TODO: do not hardcode this option, should be given in the command line.
 with_gpu = False
-print 'with_gpu=',with_gpu 
+print 'with_gpu=',with_gpu
 
 
 model_config = {
@@ -142,6 +143,10 @@ model_config = {
         # MLP
         'nnet' : {
             'model'                 : 'nnet',
+            # dataset = ['mnist',
+            #            'mq+diff+std+top10', 'mq+diff+log+top10',
+            #            'mq+diff+std+log+top10', 'mq+diff+log+std+top10']
+            'dataset'               : 'mq+diff+std+log+top10',
             'features'              : None,
             # TODO: COMMON options.
             'save_model_params'     : False,
@@ -152,32 +157,32 @@ model_config = {
             'seed'                  : 1234,
             'batch_size'            : 100,
             'lr_decay'              : True,
-            'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
-            'decrease_constant'     : 1e-3,
-            'n_epochs'              : 1000,
-            'dropout_p'             : ((0.3, 0.8), float),
-            'maxout_k'              : ((2, 5), int),
-            'mom'                   : 0.5,
+            'init_lr'               : [[1e-1, 1e-3], [-1, -1]],
+            'decrease_constant'     : ((1e-4, 1e-1), float),
+            'n_epochs'              : 300,
+            'dropout_p'             : -1,#((0.3, 0.8), float),
+            'maxout_k'              : -1,#((2, 5), int),
+            'mom'                   : 0,#((0.4, 0.8), float),
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
             # TODO: not used yet.
-            'output_activation'     : 'softmax',
+            'output_activation'     : 'binary_cross_entropy',
             # Early-stopping.
             # Look at this many examples regardless.
             'patience'              : 10000,
             # Wait this much longer when a new best is found.
             'patience_increase'     : 2,
             # A relative improvement of this much is considered significant.
-            'improvement_threshold' : 0.995,
+            'improvement_threshold' : 0.99995,
             # regularization terms
-            'L1'                    : 0,
-            'L2'                    : 0,
+            'L1'                    : ((1e-10, 1), float),
+            'L2'                    : ((1e-10, 1), float),
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'          : [[500, 1500], [500, 1500]],
+            'hidden_sizes'          : [[500, 2000], [500, 2000]],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
-            'activation'            : 'tanh',
+            'hidden_activation'     : 'tanh',
         },
 
         # Convolutional neural net.
@@ -193,13 +198,13 @@ model_config = {
             'seed'                  : 1234,
             'batch_size'            : 100,
             'lr_decay'              : True,
-            'init_lr'               : [[1e-1, 1e-1], [-1, -1]],
-            'decrease_constant'     : 1e-3,
+            'init_lr'               : [[1e-1, 1e-3], [-1, -1]],
+            'decrease_constant'     : ((1e-4, 1e-1), float),
             'n_epochs'              : 1000,
-            'dropout_p'             : ((0.3, 0.8), float),
-            'maxout_k'              : ((2, 5), int),
-            'mom'                   : 0.5,
-            'filter_square_limit'   : 15.0,         
+            'dropout_p'             : -1,#,((0.3, 0.8), float),
+            'maxout_k'              : -1,#((2, 5), int),
+            'mom'                   : 0,#0.5,
+            'filter_square_limit'   : 15.0,
             # TODO: not used yet.
             'output_activation'     : 'softmax',
             # Early-stopping.
@@ -208,13 +213,13 @@ model_config = {
             # Wait this much longer when a new best is found.
             'patience_increase'     : 2,
             # A relative improvement of this much is considered significant.
-            'improvement_threshold' : 0.995,
+            'improvement_threshold' : 0.99995,
             # regularization terms
-            'L1'                    : 0,
-            'L2'                    : 0,
+            'L1'                    : ((1e-10, 1), float),
+            'L2'                    : ((1e-10, 1), float),
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'          : [[500, 1500], [500, 1500]],
+            'hidden_sizes'          : [[500, 2500], [500, 2500]],
             # Hidden output activation:
             # tanh, rectifier, softplus, sigmoid, hard_tanh
             'activation'            : 'tanh',
@@ -223,6 +228,14 @@ model_config = {
             'nkerns'            : [20, 50],
         },
 }
+
+
+def worker(num, cmd):
+    """worker function"""
+    print 'Worker %s' %num
+    os.system(cmd)
+    return
+
 
 def exp_sampling(((low,high),t)):
   low = numpy.log(low)
@@ -304,13 +317,18 @@ def get_cmd(model, mem):
 
 
 if __name__=='__main__':
-    mem = 2000
-    models = {'gdbt': (True, 150, 1000),  'random_forest': (False, 150, 1000),
+    mem = 1000
+    models = {'gdbt': (False, 150, 1000),  'random_forest': (False, 150, 1000),
               'svm' : (False, 150, 1500),  'lsvm'         : (False, 150, mem),
-              'knn' : (False, 150, mem),  'nnet'         : (False, 5, 1500),
+              'knn' : (False, 150, 1000),  'nnet'         : (True, 200, 1000),
               'cnn' : (False, 5, 1500)}
 
+    # Do you want to run the jobs locally instead on the cluster.
+    run_local = True
+    # Number of jobs to be run locally simultaneously.
+    n_local_jobs = 25
     cmds = []
+    exps_by_model = {}
 
     for model, (launch, n_exps, mem) in models.iteritems():
         if not launch:
@@ -320,14 +338,56 @@ if __name__=='__main__':
             os.mkdir(model)
         f = open('%s/commands_%s'%(model, model),'w')
         for i in range(n_exps):
-            f.write(cmd_line_embed(model_config[model])+'\n')
+            exp_cmd = cmd_line_embed(model_config[model])
+            f.write(exp_cmd+'\n')
+            exps_by_model.setdefault(model, [])
+            exps_by_model[model].append(exp_cmd)
         f.close()
         cmds.append((model, cmd))
 
-    import pdb; pdb.set_trace()
     for model, cmd in cmds:
         os.chdir(model)
-        os.system(cmd)
+        if not run_local:
+            os.system(cmd)
+        else:
+            print 'Jobs will be run locally.'
+            print '%s jobs will be run simultaneously.'%n_local_jobs
+            import pdb; pdb.set_trace()
+            n_jobs = 0
+            n_job_simult = 0
+            jobs = []
+            commands = exps_by_model[model]
+            for command in commands:
+                if n_job_simult < n_local_jobs:
+                    assert len(jobs) <= n_local_jobs
+                    p = multiprocessing.Process(target=worker, args=(n_jobs, command))
+                    jobs.append((n_jobs, p))
+                    p.start()
+                    n_jobs += 1
+                    n_job_simult += 1
+                else:
+                    ready_for_more = False
+                    while not ready_for_more:
+                        for j_i, j in enumerate(jobs):
+                            if 'stopped' in str(j[1]):
+                                print 'Job %s finished' %j[0]
+                                jobs.pop(j_i)
+                                n_job_simult -= 1
+                                ready_for_more = True
+                                break
+
+            more_jobs = True
+            while more_jobs:
+                for j_i, j in enumerate(jobs):
+                    if 'stopped' in str(j[1]):
+                        print 'Job %s finished' %j[0]
+                        jobs.pop(j_i)
+                    if len(jobs) == 0:
+                        more_jobs = False
+                        break
+            print 'All jobs finished running.'
+
+
         os.chdir('../')
 
     '''

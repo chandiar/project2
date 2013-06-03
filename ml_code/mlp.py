@@ -62,14 +62,20 @@ class LinearOutputLayer(object):
         self.n_in = n_in
         self.n_out = n_out
 
-        # TODO: number of output units is hardcoded to 10 for mnist.
-        assert n_out == 10
-        # initialize with 0 the weights W as a matrix of shape (n_in, n_out)
-        self.W = theano.shared(value=numpy.zeros((n_in, n_out),
-                            dtype='float32'),name='W')
-        # initialize the baises b as a vector of n_out 0s
-        self.b = theano.shared(value=numpy.zeros((n_out,),
-                            dtype='float32'), name='b')
+        if self.n_out == 1:
+            self.W = theano.shared(value=numpy.zeros((n_in,1),
+                                dtype='float32'),
+                                name='W')
+            # initialize the biases b as a vector of n_out 0s
+            self.b = theano.shared(value=numpy.asarray(0).astype('float32'),
+                                   name='b')
+        else:
+            # initialize with 0 the weights W as a matrix of shape (n_in, n_out)
+            self.W = theano.shared(value=numpy.zeros((n_in, n_out),
+                                dtype='float32'),name='W')
+            # initialize the baises b as a vector of n_out 0s
+            self.b = theano.shared(value=numpy.zeros((n_out,),
+                                dtype='float32'), name='b')
 
         if W is not None:
             self.W = W
@@ -77,12 +83,40 @@ class LinearOutputLayer(object):
             # dropout will pass b from its dropout_layers[-1]
             self.b = b
 
-        # TODO: not used.
-        #self.pre_activation = T.dot(inputs, self.W) + self.b
         self.output = T.dot(inputs, self.W) + self.b
 
         # parameters of the model
         self.params = [self.W, self.b]
+
+
+class CrossEntropyOutputLayer(LinearOutputLayer):
+    def __init__(self, inputs, n_in, n_out, W=None, b=None):
+        assert n_out == 1
+        super(CrossEntropyOutputLayer, self).__init__(inputs, n_in, n_out, W, b)
+        self.p_y_given_x = T.nnet.sigmoid(self.output)
+        self.y_pred = T.switch(T.ge(self.p_y_given_x, 0.5), 1, 0)
+
+    def cost(self, y):
+        """
+        y should be a vector representing probabilities
+        """
+        predicts = self.p_y_given_x
+        predicts = predicts.flatten()
+        rval = T.mean(- y*T.log(predicts) - (1-y)*T.log(1-predicts))
+
+        return rval
+
+    def cls_error(self, y):
+        # Note: if y is a binary target, we don't have to divide the target
+        # into 2 parts. However, when classifying the fun ratings, we will
+        # have to this division.
+        if y.dtype.startswith('float'):
+            # the T.neq operator returns a vector of 0s and 1s, where 1
+            # represents a mistake in prediction
+            y = T.switch(T.lt(y,0.5), 0, 1)
+        #else:
+            #raise NotImplementedError()
+        return T.mean(T.neq(self.y_pred.flatten(), y))
 
 
 class SoftmaxOutputLayer(LinearOutputLayer):
@@ -214,7 +248,7 @@ class HiddenLayer(object):
 
         linear_output = T.dot(input, self.W) + self.b
 
-        if self.activation == 'rectified_linear':
+        if self.activation == 'rectifier':
             self.output = rectified_linear_activation(linear_output)
         elif self.activation == 'linear':
             self.output = linear_output
@@ -314,14 +348,14 @@ class MLP(object):
 
     A multilayer perceptron is a feedforward artificial neural network model
     that has one layer or more of hidden units and nonlinear activations.
-    Intermediate layers usually have as activation function thanh or the
+    Intermediate layers usually have as activation function tanh or the
     sigmoid function (defined here by a ``SigmoidalLayer`` class)  while the
     top layer is a softmax layer (defined here by a ``LogisticRegression``
     class).
     """
 
-    def __init__(self, rng, inputs, n_in, hidden_sizes, n_out, activation=None,
-                 dropout_p=False, maxout_k=False):
+    def __init__(self, rng, inputs, n_in, hidden_sizes, n_out, output_activation,
+                 hidden_activation=None, dropout_p=False, maxout_k=False):
         """Initialize the parameters for the multilayer perceptron
 
         :type rng: numpy.random.RandomState
@@ -346,25 +380,43 @@ class MLP(object):
 
         print 'building MLP...'
 
+        self.output_activation = output_activation
+
         if dropout_p == -1 and maxout_k == -1:
             # No dropout or maxout.
             print 'No dropout or maxout!'
             self._init_ordinary(rng, inputs, n_in, hidden_sizes,
-                                n_out, activation)
+                                n_out, hidden_activation)
         else:
             # Dropout-only or maxout.
             self._init_with_dropout(rng, inputs, n_in, hidden_sizes, n_out,
-                                    activation, dropout_p, maxout_k)
+                                    hidden_activation, dropout_p, maxout_k)
 
-    def _init_ordinary(self,rng, inputs, n_in, hidden_sizes, n_out, activation):
+    def _init_ordinary(self,rng, inputs, n_in, hidden_sizes, n_out, hidden_activation):
 
         self.layers = []
         if hidden_sizes[0] == 0:
             print 'No hidden layer is built.'
-            print 'Ouput layer is a softmax.'
-            output_layer = SoftmaxOutputLayer(
-                inputs=inputs,
-                n_in=n_in, n_out=n_out)
+            if self.output_activation == 'regression':
+                print 'Output layer is a regression layer.'
+                raise NotImplementedError('Not yet supported!')
+            elif self.output_activation == 'binary_cross_entropy':
+                print 'Ouput layer is the binary cross entropy layer.'
+                output_layer = CrossEntropyOutputLayer(
+                    inputs=inputs,
+                    n_in=n_in, n_out=n_out)
+            elif self.output_activation == 'softmax':
+                print 'Ouput layer is a softmax layer.'
+                output_layer = SoftmaxOutputLayer(
+                    inputs=inputs,
+                    n_in=n_in, n_out=n_out)
+            elif self.output_activation == 'sigmoid':
+                # NOTE: check if the sigmoid output activation is the same as
+                # the binary cross entropy output activation.
+                print 'Output layer is a sigmoid layer.'
+                raise NotImplementedError('Not yet supported!')
+            else:
+                raise NotImplementedError('%s not supported!'%self.output_activation)
         else:
             print 'constructing ordinary %d layers...'%len(hidden_sizes)
 
@@ -375,20 +427,39 @@ class MLP(object):
                 print 'building hidden layer of size (%d,%d)'%(n_in, n_out)
                 next_layer = HiddenLayer(rng=rng,
                                          input=next_layer_input,
-                                         activation=activation,
+                                         activation=hidden_activation,
                                          n_in=n_in, n_out=n_out,
                                      )
                 self.layers.append(next_layer)
                 next_layer_input = next_layer.output
 
-            # The logistic regression (softmax) layer
+            # Output layer.
             n_in, n_out = weight_matrix_sizes[-1]
-            # TODO: number of output hardcoded to 10 for mnnist.
-            assert n_out == 10
-            print 'init softmax with NLL output layer...'
-            output_layer = SoftmaxOutputLayer(
+            if n_out == 1:
+                if self.output_activation == 'regression':
+                    print 'init regression with MSE output layer...'
+                    raise NotImplementedError('Not yet supported!')
+                elif self.output_activation == 'binary_cross_entropy':
+                    print 'init sigmoid with CE output layer...'
+                    output_layer = CrossEntropyOutputLayer(
+                                    inputs=next_layer_input,
+                                    n_in=n_in, n_out=n_out)
+                elif self.output_activation == 'sigmoid':
+                    print 'init sigmoid with NLL ouput layer...'
+                    raise NotImplementedError('Not yet supported!')
+                    output_layer = SigmoidOutputLayer(
                         inputs=next_layer_input,
                         n_in=n_in, n_out=n_out)
+                else:
+                    raise NotImplementedError('%s not supported!'%self.output_activation)
+            else:
+                if self.output_activation == 'softmax':
+                    print 'init softmax with NLL output layer...'
+                    output_layer = SoftmaxOutputLayer(
+                                inputs=next_layer_input,
+                                n_in=n_in, n_out=n_out)
+                else:
+                    raise NotImplementedError('%s not supported!'%self.output_activation)
 
         self.layers.append(output_layer)
 
@@ -414,13 +485,13 @@ class MLP(object):
 
 
     def _init_with_dropout(self, rng, inputs, n_in, hidden_sizes, n_out,
-                           activation, dropout_p, maxout_k):
+                           hidden_activation, dropout_p, maxout_k):
 
         try:
             assert hidden_sizes[0] != 0
         except:
             raise AssertionError('You should not try dropout/maxout without '
-                                 ' hidden layers')
+                                 'hidden layers')
         self.layers = []
         self.dropout_layers = []
         layer_sizes = [n_in] + hidden_sizes + [n_out]
@@ -428,15 +499,15 @@ class MLP(object):
 
         next_layer_input = inputs
         next_dropout_layer_input = DropoutHiddenLayer.apply_dropout(rng, inputs, 0.2)
-        # Construct all the layers (input+hidden) except the top logistic
-        # regression layer which is done afterwards.
+        # Construct all the layers (input+hidden) except the top layer which is
+        # done afterwards.
         for n_in, n_out in weight_matrix_sizes[:-1]:
             if maxout_k == -1:
                 print 'building Dropout hidden layer of size (%d,%d)'%(
                     n_in, n_out)
                 next_dropout_layer = DropoutHiddenLayer(rng=rng,
                                 input=next_dropout_layer_input,
-                                activation=activation, n_in=n_in,
+                                activation=hidden_activation, n_in=n_in,
                                 n_out=n_out, dropout_p=dropout_p
                                 )
             else:
@@ -444,7 +515,7 @@ class MLP(object):
                     n_in, n_out)
                 next_dropout_layer = MaxoutHiddenLayer(rng=rng,
                                 input=next_dropout_layer_input,
-                                activation=activation, n_in=n_in, n_out=n_out,
+                                activation=hidden_activation, n_in=n_in, n_out=n_out,
                                 dropout_p=dropout_p, maxout_k=maxout_k,
                                 )
             self.dropout_layers.append(next_dropout_layer)
@@ -452,7 +523,7 @@ class MLP(object):
             if maxout_k == -1:
                 next_layer = HiddenLayer(rng=rng,
                                      input=next_layer_input,
-                                     activation=activation,
+                                     activation=hidden_activation,
                                      W=next_dropout_layer.W * 0.5,
                                      b=next_dropout_layer.b,
                                      n_in=n_in, n_out=n_out
@@ -460,7 +531,7 @@ class MLP(object):
             else:
                 next_layer = MaxPoolingHiddenLayer(rng=rng,
                                      input=next_layer_input,
-                                     activation=activation,
+                                     activation=hidden_activation,
                                      W=next_dropout_layer.W * 0.5,
                                      b=next_dropout_layer.b,
                                      n_in=n_in, n_out=n_out,
@@ -469,27 +540,70 @@ class MLP(object):
             self.layers.append(next_layer)
             next_layer_input = next_layer.output
 
-
-        # The logistic regression (softmax) layer.
+        # Output layer.
         n_in, n_out = weight_matrix_sizes[-1]
         print 'building output layer of size (%d,%d)'%(n_in, n_out)
-        assert n_out == 10
-        print 'init softmax with NLL output layer...'
-        dropout_output_layer = SoftmaxOutputLayer(
-                        inputs=next_dropout_layer_input,
-                        n_in=n_in, n_out=n_out)
+
+        if n_out == 1:
+            if self.output_activation == 'regression':
+                print 'init linear regression with MSE output layer...'
+                raise NotImplementedError('Not yet supported!')
+            elif self.output_activation == 'binary_cross_entropy':
+                print 'init sigmoid with CE output layer...'
+                dropout_output_layer = CrossEntropyOutputLayer(
+                                            inputs=next_dropout_layer_input,
+                                            n_in=n_in, n_out=n_out)
+            elif self.output_activation == 'sigmoid':
+                print 'init sigmoid with NLL ouput layer...'
+                raise NotImplementedError('Not yet supported!')
+                dropout_output_layer = SigmoidOutputLayer(
+                                            inputs=next_dropout_layer_input,
+                                            n_in=n_in, n_out=n_out)
+            else:
+                raise NotImplementedError('%s not supported!'%self.output_activation)
+        else:
+            if self.output_activation == 'softmax':
+                print 'init softmax with NLL output layer...'
+                dropout_output_layer = SoftmaxOutputLayer(
+                                            inputs=next_dropout_layer_input,
+                                            n_in=n_in, n_out=n_out)
+            else:
+                raise NotImplementedError('%s not supported!'%self.output_activation)
 
         self.dropout_layers.append(dropout_output_layer)
 
         # Again, reuse parameters in the dropout output.
-        # TODO: the number of ouput units is hardcoded to 10 for mnist.
-        assert n_out == 10
-        # Ouput layer is a softmax layer.
-        output_layer = SoftmaxOutputLayer(
-            inputs=next_layer_input,
-            W=dropout_output_layer.W * 0.5,
-            b=dropout_output_layer.b,
-            n_in=n_in, n_out=n_out)
+        if n_out == 1:
+            if self.output_activation == 'regression':
+                print 'init linear regression with MSE output layer...'
+                raise NotImplementedError('Not yet supported!')
+            elif self.output_activation == 'binary_cross_entropy':
+                print 'init sigmoid with CE output layer...'
+                output_layer = CrossEntropyOutputLayer(
+                                    inputs=next_layer_input,
+                                    W=dropout_output_layer.W * 0.5,
+                                    b=dropout_output_layer.b,
+                                    n_in=n_in, n_out=n_out)
+            elif self.output_activation == 'sigmoid':
+                print 'init sigmoid with NLL ouput layer...'
+                raise NotImplementedError('Not yet supported!')
+                output_layer = SigmoidOutputLayer(
+                                    inputs=next_layer_input,
+                                    W=dropout_output_layer.W * 0.5,
+                                    b=dropout_output_layer.b,
+                                    n_in=n_in, n_out=n_out)
+            else:
+                raise NotImplementedError('%s not supported!'%self.output_activation)
+        else:
+            if self.output_activation == 'softmax':
+                # Ouput layer is a softmax layer.
+                output_layer = SoftmaxOutputLayer(
+                    inputs=next_layer_input,
+                    W=dropout_output_layer.W * 0.5,
+                    b=dropout_output_layer.b,
+                    n_in=n_in, n_out=n_out)
+            else:
+                raise NotImplementedError('%s not supported!'%self.output_activation)
 
         self.layers.append(output_layer)
 
@@ -527,7 +641,6 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
 
     rng = numpy.random.RandomState(state.seed)
 
-
     ####### THEANO VARIABLES #######
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a [mini]batch
@@ -552,24 +665,28 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     else:
         # TODO: find what is momentum and how it is computed.
         # https://github.com/mdenil/dropout/blob/master/mlp.py
-        '''
         momentum = theano.ifelse.ifelse(tepoch < 500,
                     T.cast(state.mom*(1. - tepoch/500.) + 0.7*(tepoch/500.),
                     'float32'),T.cast(0.7, 'float32'))
-        '''
-        momentum = theano.ifelse.ifelse(tepoch < 500,
-                    T.cast(state.mom*(1. - tepoch/500.) + 0.99*(tepoch/500.),
-                    'float32'),T.cast(0.99, 'float32'))
 
     # end of theano variables initialization
 
 
     ####### BUILDING THE MLP MODEL #######
     # Construct the MLP class
-    # TODO: Input and output size hardcoded for mnist.
-    classifier = MLP(rng=rng, inputs=x, n_in=28 * 28,
-                     hidden_sizes=state.hidden_sizes, n_out=10,
-                     activation=state.activation, dropout_p=state.dropout_p,
+    n_in = train_x.get_value().shape[1]
+    if state.dataset == 'mnist':
+        n_out = 10
+    elif 'mq' in state.dataset:
+        n_out = 1
+    else:
+        raise NotImplementedError('Dataset %s not supported!'%state.dataset)
+
+    classifier = MLP(rng=rng, inputs=x, n_in= n_in,
+                     hidden_sizes=state.hidden_sizes, n_out=n_out,
+                     hidden_activation=state.hidden_activation,
+                     output_activation=state.output_activation,
+                     dropout_p=state.dropout_p,
                      maxout_k=state.maxout_k)
 
 
@@ -766,10 +883,11 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                                 # on the validation set; in this case we
                                 # check every epoch
 
-    best_validation_loss = numpy.inf
+    best_validation_score = numpy.inf
     best_iter = 0
     best_epoch = 0
-    test_score = 0.
+    best_test_score = 0.
+    best_test_cost = 0.
     start_time = time.clock()
 
     epoch = 0
@@ -793,6 +911,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
     best_test_p_y_given_x = []
     # Best model params so far based on validation nll.
     best_params = []
+    this_valid_score = None
 
     vpredictions = []
     tpredictions = []
@@ -815,6 +934,8 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                 minibatch_avg_cost = sum(train_model_on_batch_fn(minibatch_index, epoch))
                 train_costs_with_reg.append(minibatch_avg_cost)
 
+                # TODO: if we don't want to save the losses and costs, we
+                # should still be able to compute the train costs with no reg.
                 if state.save_losses_and_costs:
                     # Train costs with no regularization.
                     train_error, train_cost = train_error_and_cost_on_batch_fn(minibatch_index)
@@ -836,6 +957,18 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                     this_validation_loss = numpy.mean(v_losses)
                     this_validation_cost = numpy.mean(v_costs)
 
+                    if state.dataset == 'mnist':
+                        this_valid_score = this_validation_loss
+                        print('epoch %i, minibatch %i/%i, validation error %f %%' %
+                                (epoch, minibatch_index + 1, n_train_batches,
+                                this_valid_score * 100.))
+                    else:
+                        this_valid_score = this_validation_cost
+                        print('epoch %i, minibatch %i/%i, train error %f , validation error %f ' %
+                                (epoch, minibatch_index + 1, n_train_batches,
+                                numpy.mean(train_costs_without_reg),
+                                this_valid_score))
+
                     if state.save_losses_and_costs:
                         all_valid_losses.setdefault(epoch, 0)
                         all_valid_losses[epoch] = this_validation_loss
@@ -843,18 +976,14 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                         all_valid_costs.setdefault(epoch, 0)
                         all_valid_costs[epoch] = this_validation_cost
 
-                    print('epoch %i, minibatch %i/%i, validation error %f %%' %
-                        (epoch, minibatch_index + 1, n_train_batches,
-                        this_validation_loss * 100.))
-
                     # if we got the best validation score until now
-                    if this_validation_loss < best_validation_loss:
+                    if this_valid_score < best_validation_score:
                         # improve patience if loss improvement is good enough
-                        if this_validation_loss < best_validation_loss *  \
+                        if this_valid_score < best_validation_score *  \
                             state.improvement_threshold:
                             state.patience = max(state.patience, iter * state.patience_increase)
 
-                        best_validation_loss = this_validation_loss
+                        best_validation_score = this_valid_score
                         v_p_y_given_x = []
                         for i in xrange(n_valid_batches):
                             p_y_given_x = valid_output_on_batch_fn(i)
@@ -886,27 +1015,33 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
                             t_costs.append(cost)
                             t_p_y_given_x.append(p_y_given_x)
 
-                        test_score = numpy.mean(t_losses)
-                        this_test_cost = numpy.mean(t_costs)
+                        best_test_score = numpy.mean(t_losses)
+                        best_test_cost = numpy.mean(t_costs)
                         # Best nnet ouputs on test set.
                         best_test_p_y_given_x = t_p_y_given_x
 
                         if state.save_losses_and_costs:
                             all_test_losses.setdefault(epoch, 0)
-                            all_test_losses[epoch] = test_score
+                            all_test_losses[epoch] = best_test_score
 
                             all_test_costs.setdefault(epoch, 0)
-                            all_test_costs[epoch] = this_test_cost
+                            all_test_costs[epoch] = best_test_cost
 
                         if state.save_model_info:
                             # Best predictions on test set.
                             best_test_pred_and_targ = numpy.array([test_pred_and_targ_on_batch_fn(i)
                                                                    for i in xrange(n_test_batches)])
 
-                        print(('     epoch %i, minibatch %i/%i, test error of '
-                            'best model %f %%') %
-                            (epoch, minibatch_index + 1, n_train_batches,
-                            test_score * 100.))
+                        if state.dataset == 'mnist':
+                            print(('     epoch %i, minibatch %i/%i, test error of '
+                                'best model %f %%') %
+                                (epoch, minibatch_index + 1, n_train_batches,
+                                best_test_score * 100.))
+                        else:
+                            print(('     epoch %i, minibatch %i/%i, test error of '
+                                'best model %f ') %
+                                (epoch, minibatch_index + 1, n_train_batches,
+                                best_test_cost))
 
                 if state.patience <= iter:
                     done_looping = True
@@ -935,13 +1070,17 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
         print '\n\nskip !'
 
     end_time = time.clock()
-    print(('Optimization complete. Best validation score of %f %% '
-        'obtained at iteration %i (epoch %i), with test performance %f %%') %
-        (best_validation_loss * 100., best_iter + 1, best_epoch,test_score * 100.))
+    if state.dataset == 'mnist':
+        print(('Optimization complete. Best validation score of %f %% '
+            'obtained at iteration %i (epoch %i), with test performance %f %%') %
+            (best_validation_score * 100., best_iter + 1, best_epoch, best_test_score * 100.))
+    else:
+        print(('Optimization complete. Best validation score of %f '
+            'obtained at iteration %i (epoch %i), with test performance %f ') %
+            (best_validation_score, best_iter + 1, best_epoch, best_test_cost))
     print >> sys.stderr, ('The code for file ' +
                         os.path.split(__file__)[1] +
                         ' ran for %.2fm' % ((end_time - start_time) / 60.))
-
 
     if state.save_losses_and_costs:
         save_model_losses_and_costs(state.model, all_train_losses, all_valid_losses,

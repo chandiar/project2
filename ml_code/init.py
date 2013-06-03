@@ -80,10 +80,29 @@ def main(state, channel):
     train_valid_x, train_valid_y = shuffle(train_valid_x, train_valid_y, random_state=random_state)
     test_x, test_y = shuffle(test_x, test_y)
     '''
+    dataset = None
+    data_path = None
+    splits = None
 
     if state.features is None:
-        data_path = os.path.join(data_dir, 'mnist.pkl.gz')
-        print 'Loading the MNIST dataset from %s' %data_path
+        if state.dataset == 'mnist':
+            dataset = os.path.join(data_dir, 'mnist.pkl.gz')
+            splits = [train_size, valid_size, test_size]
+            print 'Loading the MNIST dataset from %s' %data_path
+        elif state.dataset in ['mq+diff+std+top10']:
+            data_path = os.path.join(data_dir, 'MQ', 'standardized', 'diff_augmented')
+            print 'Loading the augmented standardized MQ dataset from %s' %data_path
+        elif state.dataset in ['mq+diff+log+top10']:
+            data_path = os.path.join(data_dir, 'MQ', 'log_normalized', 'diff_augmented')
+            print 'Loading the augmented log-normalized MQ dataset from %s' %data_path
+        elif state.dataset in ['mq+diff+log+std+top10']:
+            data_path = os.path.join(data_dir, 'MQ', 'log_normalized+standardized', 'diff_augmented')
+            print 'Loading the augmented log-normalized+standardized MQ dataset from %s' %data_path
+        elif state.dataset in ['mq+diff+std+log+top10']:
+            data_path = os.path.join(data_dir, 'MQ', 'standardized+log_normalized', 'diff_augmented')
+            print 'Loading the augmented standardized+log-normalized MQ dataset from %s' %data_path
+        else :
+            raise NotImplementedError('Datatset %s not supported!'%state.dataset)
         if state.model in ['nnet', 'cnn']:
             state.gpu = True
             print 'GPU should be enabled'
@@ -94,12 +113,14 @@ def main(state, channel):
         else:
             #print 'GPU disabled'
             print 'Loading dataset in numpy array'
-        datasets = load_data(data_path, splits=[train_size, valid_size, test_size], shared=state.gpu)
+        datasets = load_data(dataset=dataset, data_path=data_path, splits=splits, shared=state.gpu, state=state)
 
         train_x, train_y = datasets[0]
         valid_x, valid_y = datasets[1]
         test_x, test_y = datasets[2]
     else:
+        print 'Using HOG features'
+        assert state.dataset == 'mnist'
         data_path = os.path.join(data_dir, 'mnist.pkl.gz')
         f = gzip.open(data_path, 'rb')
         train_set, valid_set, test_set = cPickle.load(f)
@@ -112,10 +133,10 @@ def main(state, channel):
         train_y = train_set[1]
         valid_y = valid_set[1]
         test_y = test_set[1]
- 
+
         #train_x = train_x[0:1000,:]
         #train_y = train_y[0:1000]
-       
+
         #import pdb; pdb.set_trace()
 
     # Cross-validation.
@@ -225,7 +246,7 @@ def train(state, channel, train_x, train_y, valid_x, valid_y, test_x, test_y):
             print 'Computing valid predictions'
             vpredictions = classifier.predict(valid_x)
         else:
-            vpredictions = []        
+            vpredictions = []
         print 'Computing test predictions'
         tpredictions = classifier.predict(test_x)
     else:
@@ -285,18 +306,24 @@ def experiment(state, channel):
 if __name__ == '__main__':
     from jobman import DD, expand
     # TODO: use jobman DD instead of dictionnary.
-    args = {'model'                 : 'lsvm',
-            # TODO: add 'model_type' option.
-            'dataset'               : 'mnist',
-            'features'              : 'hog',
-            # TODO: option only for nnet et cnn.
+    args = {'model'                 : 'nnet',
+            # dataset = ['mnist',
+            #            'mq+diff+std+top10', 'mq+diff+log+top10',
+            #            'mq+diff+std+log+top10', 'mq+diff+log+std+top10']
+            'dataset'                : 'mq+diff+std+log+top10',
+            #'normalize'              : False,
+            #'log_normalize'          : False,
+            #'top_features'         : {'cattrs':[], 'uattrs':[], 'srates':[], 'cfeatures':[]},
+            #'save_path'             : '',
+            # features = ['hog', None]
+            'features'              : None,
+            # TODO: option only for nnet and cnn.
             'save_losses_and_costs' : True,
-            'save_model_params'     : True,
-            'save_model_info'       : True,
+            'save_model_params'     : False,
+            'save_model_info'       : False,
             'save_state'            : True,
-            # If using gpu, we will load the dataset
-            # as a shared variable.
-            'gpu'               : False,
+            # If using gpu, we will load the dataset as a shared variable.
+            'gpu'               : True,
             ### gdbt and random_forest ###
             'n_estimators'      : 90,
             'learning_rate'     : 1e-1,
@@ -323,34 +350,36 @@ if __name__ == '__main__':
             'seed'              : 1234,
             'batch_size'        : 100,
             'lr_decay'          : True,
-            'init_lr'           : [1e-1, 1e-1],
+            'init_lr'           : [1e-2, 1e-2],
             'decrease_constant' : 1e-3,
             'n_epochs'          : 1000,
             # Set dropout_p and maxout_k to -1 to not use them.
-            'dropout_p'             : -1,#0.5,
+            'dropout_p'             : -1,#0.2,
             'maxout_k'              : -1,#2,
             # Set mom to 0 to not use momentum.
             'mom'                   : 0.5,
             'filter_square_limit'   : 15.0,
             # Top layer output activation.
-            # TODO: not used yet.
-            'output_activation'     : 'softmax',
+            # output_activation = ['softmax', 'regression',
+            #                      'binary_cross_entropy', 'sigmoid'].
+            #'output_activation'     : 'softmax',
+            'output_activation'     : 'binary_cross_entropy',
             # Early-stopping.
             # Look at this many examples regardless.
             'patience'          : 10000,
             # Wait this much longer when a new best is found.
             'patience_increase' : 2,
             # A relative improvement of this much is considered significant.
-            'improvement_threshold'  : 0.995,
+            'improvement_threshold'  : 0.99995,
             # regularization terms
-            'L1'                : 0,
-            'L2'                : 0,
+            'L1'                : 1e-5,
+            'L2'                : 1e-5,
             ## Hidden layers ##
             # set this to [0] to fall back to LR
-            'hidden_sizes'      : [500],
+            'hidden_sizes'      : [1000],
             # Hidden output activation:
-            # tanh, rectifier, softplus, sigmoid, hard_tanh
-            'activation' : 'tanh',
+            # tanh, rectifier, softplus, sigmoid, linear, hard_tanh (not supported)
+            'hidden_activation' : 'sigmoid',
             ### cnn ###
             # Number of filters.
             'nkerns'            : [20, 50],
